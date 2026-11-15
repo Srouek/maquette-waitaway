@@ -1,0 +1,146 @@
+// Vocabulaire : docs/02-GLOSSAIRE.md de QueueAPI.
+
+export type Group = 'coupe' | 'barbe' | 'soin' | 'autre';
+
+export type Prestation = { id: string; label: string; minutes: number; group: Group; description: string };
+
+/** Comment le client simulé se comporte. `moi` = le client qui tient le téléphone. */
+/** `retard` : confirme 8 min après l'alerte. `absent` : ne vient jamais. */
+export type Behavior = 'moi' | 'ponctuel' | 'retard' | 'absent';
+
+export type Ticket = {
+  id: string;
+  seq: number;
+  name: string;
+  /** Vide pour un walk-in : l'agent ne choisit qu'une durée (S44). */
+  prestationIds: string[];
+  /** Durée en minutes, fixée par les durées de l'agent (QA-18). */
+  duration: number;
+  joinedAt: number;
+  behavior: Behavior;
+  anonymous?: boolean;
+  /** Ticket créé par l'agent pour un client entré sans scanner. Reste vrai après le rattachement. */
+  walkIn?: boolean;
+  /** Inscription qui finirait après la fermeture : en attente de la réponse de l'agent, puis acceptée ou refusée. */
+  overtime?: 'pending' | 'accepted' | 'refused';
+  /** Le walk-in a scanné le QR code de son ticket : il a maintenant un nom et des prestations (QA-27). */
+  claimedAt?: number;
+  confirmedAt?: number;
+  remindedAt?: number;
+  calledAt?: number;
+  lateNotifiedAt?: number;
+  /** Dernière décision de l'agent sur ce retard (attendre, prendre quelqu'un d'autre). */
+  lateDecidedAt?: number;
+  startedAt?: number;
+  doneAt?: number;
+  abortAt?: number;
+  abortReason?: 'self' | 'rejected_by_agent';
+  rejectMotif?: string;
+};
+
+export type PauseId = 'matin' | 'midi' | 'aprem';
+
+/** Pause telle que l'agent la règle : dans sa semaine type, puis à l'ouverture de sa file. */
+export type PausePlan = { id: PauseId; on: boolean; at: number; minutes: number };
+
+/** Pause de la journée en cours. */
+export type Pause = {
+  id: PauseId;
+  /** Heure souhaitée, en minutes depuis minuit. */
+  plannedAt: number;
+  minutes: number;
+  remindedAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+  skipped?: boolean;
+  /** Ticket devant lequel la pause a été placée. Une fois posé, ce choix ne bouge plus. */
+  beforeTicketId?: string;
+};
+
+/** 1 jour de la semaine type. `day` : 0 = lundi. */
+export type DayPlan = { day: number; works: boolean; start: number; end: number; pauses: PausePlan[] };
+
+export type QueueFile = {
+  id: string;
+  agentName: string;
+  metier: string;
+  prestations: Prestation[];
+  pauses: Pause[];
+  open: boolean;
+  /** Fin de journée, en minutes depuis minuit. */
+  endOfDay: number;
+  closedAt?: number;
+  tickets: Ticket[];
+};
+
+/** Compte de l'agent qui tient la vue « Coiffeur ». */
+export type AgentAccount = {
+  loggedIn: boolean;
+  /** Étape de création du compte. `done` : le compte est prêt. */
+  setup: 'profil' | 'prestations' | 'horaires' | 'done';
+  email: string;
+  firstName: string;
+  lastName: string;
+  week: DayPlan[];
+};
+
+export type Notif = {
+  id: number;
+  to: 'client' | 'agent';
+  title: string;
+  body: string;
+};
+
+export type ClientNav =
+  | { screen: 'home' }
+  | { screen: 'store' }
+  | { screen: 'choose'; fileId: string; preselect?: string[]; tried?: boolean }
+  | { screen: 'signup'; fileId: string; prestationIds: string[] }
+  | { screen: 'joined' }
+  | { screen: 'account' }
+  | { screen: 'confirmed' };
+
+/** Inscription d'un client simulé, prévue par le scénario. */
+export type Arrival = {
+  fileId: string;
+  name: string;
+  prestationIds: string[];
+  behavior: Behavior;
+  /** Heure d'inscription. */
+  at?: number;
+  /** Ou : minutes avant la fin de journée de la file. */
+  beforeEnd?: number;
+};
+
+export type ScenarioId = 'pro-journee' | 'client' | 'pro-compte';
+
+export type SimState = {
+  /** Heure simulée, en minutes depuis minuit. */
+  now: number;
+  /** Jour simulé. 0 = lundi. */
+  weekday: number;
+  files: QueueFile[];
+  agent: AgentAccount;
+  me: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    favorites: string[];
+    reminderMinutes: number;
+    ticketRef?: { fileId: string; ticketId: string };
+  };
+  clientNav: ClientNav;
+  notifs: Notif[];
+  /** Ticket signalé par `customer.late`, en attente d'une décision de l'agent. */
+  lateAlert?: { fileId: string; ticketId: string };
+  /** Inscriptions à venir. */
+  script: Arrival[];
+  /** Rattachement prévu par le scénario : le walk-in qui attend depuis `after` min s'inscrit dans l'application. */
+  claim?: { after: number; name: string; prestationIds: string[] };
+  /** Vrai quand personne ne tient le téléphone du coiffeur : il prend ses pauses seul. */
+  autoAgent: boolean;
+  /** Scénario en cours et étape du guide. */
+  scenario: { id: ScenarioId; beat: number };
+  nextId: number;
+  playing: boolean;
+};
