@@ -1,0 +1,12 @@
+# Généré
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Poste de travail
+.DS_Store
+.vscode/
+*.log
+
+# Images d'un tiers, qui n'ont servi que de modèle de style aux icônes : elles ne sont pas utilisées par l'application.
+icon_exemple/
