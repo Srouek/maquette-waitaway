@@ -39,11 +39,13 @@ export function App() {
   const agentBadge = s.notifs.some((n) => n.to === 'agent') || s.lateAlert !== undefined;
   const clientBadge = s.notifs.some((n) => n.to === 'client');
   const total = stepsOf(s).length;
+  // Scénario client : seul le parcours du client compte, le téléphone du coiffeur est caché.
+  const clientOnly = scenarioId === 'client';
 
   return (
     <div className="shell">
       <div className="demobar" role="toolbar" aria-label="Contrôles de la démo">
-        {!wide && (
+        {!wide && !clientOnly && (
           <div className="seg seg-dark" role="tablist">
             <button role="tab" aria-selected={view === 'client'} className={view === 'client' ? 'on' : ''} onClick={() => setView('client')}>
               Client{view !== 'client' && clientBadge && <i className="dot" />}
@@ -97,7 +99,20 @@ export function App() {
         )}
       </div>
 
-      {wide ? (
+      {clientOnly ? (
+        <div className={wide ? 'stage' : 'single'}>
+          {wide ? (
+            <figure className="device">
+              <figcaption>Téléphone du client</figcaption>
+              <div className="device-screen">
+                <ClientApp />
+              </div>
+            </figure>
+          ) : (
+            <ClientApp />
+          )}
+        </div>
+      ) : wide ? (
         <div className="stage">
           <figure className="device">
             <figcaption>Téléphone du client</figcaption>

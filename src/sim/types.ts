@@ -32,7 +32,15 @@ export type Ticket = {
   /** Dernière décision de l'agent sur ce retard (attendre, prendre quelqu'un d'autre). */
   lateDecidedAt?: number;
   startedAt?: number;
+  /** Simulation seulement : minutes que la prestation dure réellement en plus de sa durée estimée. */
+  extra?: number;
+  /** Minutes ajoutées à la durée estimée : par tranches de 5 min constatées, ou annoncées par l'agent (`service.overrun`). */
+  overrun?: number;
+  /** Heure de passage estimée, telle que le client la connaît. Sert à le prévenir quand son tour avance. */
+  eta?: number;
   doneAt?: number;
+  /** Avis du client sur sa prestation, ou `skipped` s'il a choisi « Plus tard ». Hors backlog (16/11/2026). */
+  rating?: { stars: number; comment?: string; at: number } | 'skipped';
   abortAt?: number;
   abortReason?: 'self' | 'rejected_by_agent' | 'incident';
   rejectMotif?: string;
@@ -82,6 +90,12 @@ export type QueueFile = {
   /** La file a été fermée sur incident (QA-33), pas en fin de journée. */
   incident?: boolean;
   tickets: Ticket[];
+  /** Démo : le cas que montre ce coiffeur, affiché sous son nom dans l'écran du salon. */
+  demoTag?: string;
+  /** Les demandes d'inscription après la fermeture passent par ce coiffeur (en plus de celui du téléphone). */
+  decidesOvertime?: boolean;
+  /** Dépassements de la journée, par prestation (S20). */
+  overruns?: Record<string, number>;
 };
 
 /** Compte de l'agent qui tient la vue « Coiffeur ». */
@@ -105,8 +119,8 @@ export type Notif = {
 export type ClientNav =
   | { screen: 'home' }
   | { screen: 'store' }
-  | { screen: 'choose'; fileId: string; preselect?: string[]; tried?: boolean }
-  | { screen: 'signup'; fileId: string; prestationIds: string[] }
+  | { screen: 'choose'; fileId: string; preselect?: string[]; tried?: boolean; claim?: true }
+  | { screen: 'signup'; fileId: string; prestationIds: string[]; claim?: true }
   | { screen: 'joined' }
   | { screen: 'account' }
   | { screen: 'confirmed' };
@@ -125,6 +139,23 @@ export type Arrival = {
   minEnd?: number;
 };
 
+/**
+ * Geste d'un coiffeur simulé. En données, pas en fonction : l'état est sauvegardé en JSON.
+ * Il part à l'heure `at`, ou `afterMyTurn` min après que le ticket du client est en position 1, poste libre, sans confirmation.
+ */
+export type AgentEvent = {
+  fileId: string;
+  at?: number;
+  afterMyTurn?: number;
+  /** Heure où la condition de `afterMyTurn` est devenue vraie. */
+  armedAt?: number;
+  /** `leave` : le client `name` quitte la file. `announce` : retard de `minutes` annoncé sur la prestation en cours.
+   * `incident` : fermeture de la file sur imprévu. `replaceMine` : l'agent prend un client présent et retire le ticket du client. */
+  do: 'leave' | 'announce' | 'incident' | 'replaceMine';
+  name?: string;
+  minutes?: number;
+};
+
 export type ScenarioId = 'pro-journee' | 'client' | 'pro-compte';
 
 export type SimState = {
@@ -141,6 +172,8 @@ export type SimState = {
     favorites: string[];
     reminderMinutes: number;
     ticketRef?: { fileId: string; ticketId: string };
+    /** Le client est un walk-in : l'agent lui a créé ce ticket anonyme, il n'a pas encore scanné son QR code (QA-27). */
+    walkIn?: { fileId: string; ticketId: string };
   };
   clientNav: ClientNav;
   notifs: Notif[];
@@ -150,10 +183,12 @@ export type SimState = {
   script: Arrival[];
   /** Rattachement prévu par le scénario : le walk-in qui attend depuis `after` min s'inscrit dans l'application. */
   claim?: { after: number; name: string; prestationIds: string[] };
+  /** Ce que font les coiffeurs que personne ne joue, dans les scénarios client. */
+  agentEvents?: AgentEvent[];
   /** Vrai quand personne ne tient le téléphone du coiffeur : il prend ses pauses seul. */
   autoAgent: boolean;
-  /** Scénario en cours et étape du guide. */
-  scenario: { id: ScenarioId; beat: number };
+  /** Scénario en cours et étape du guide. `branch` : le coiffeur choisi dans le scénario client, qui décide du cas joué. */
+  scenario: { id: ScenarioId; beat: number; branch?: string };
   nextId: number;
   playing: boolean;
 };

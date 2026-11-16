@@ -1,5 +1,6 @@
 import { CATALOG } from './catalog';
-import { AGENT_FILE_ID, JULIE_PRESTATIONS, defaultWeek, h, mkTicket } from './data';
+import { SALON_START, salonFiles, salonHook, salonSteps } from './salon';
+import { AGENT_FILE_ID, MATHIS_FILE_ID, MATHIS_PRESTATIONS, defaultWeek, h } from './data';
 import { advanceUntil, fileById, inService, myTicket, pauseEnd, reducer, remaining, syncClock, waiting, type Action } from './engine';
 import type { Arrival, PauseId, QueueFile, ScenarioId, SimState } from './types';
 
@@ -163,28 +164,12 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     ],
   },
 
+  // Les étapes viennent du coiffeur choisi : voir `salon.ts`.
   client: {
     id: 'client',
     label: 'Client : je m’inscris',
-    hint: 'Scan du salon, choix du coiffeur et des prestations, création du compte, rappel, présence.',
-    steps: [
-      { view: 'client', text: 'Scanne le QR code du salon.', until: (s) => s.clientNav.screen !== 'home' },
-      { view: 'client', text: 'Regarde l’attente de chaque coiffeur, puis choisis-en un.', until: (s) => s.clientNav.screen !== 'store' },
-      { view: 'client', text: 'Choisis 1 ou plusieurs prestations, puis « Prendre ma place ».', until: (s) => s.clientNav.screen !== 'choose' },
-      { view: 'client', text: 'Crée ton compte : avec Google, ou par e-mail.', until: (s) => !!myTicket(s) },
-      { view: 'client', text: 'Choisis quand être prévenu, puis valide.', until: (s) => s.clientNav.screen !== 'joined' },
-      {
-        view: 'client',
-        text: 'Tu es libre d’attendre où tu veux.',
-        jump: 'Aller au rappel',
-        until: (s) => myTicket(s)?.ticket.remindedAt !== undefined || myTicket(s)?.ticket.confirmedAt !== undefined,
-      },
-      { view: 'client', text: 'Tu es revenu au salon : touche Scan pour confirmer ta présence.', until: (s) => myTicket(s)?.ticket.confirmedAt !== undefined },
-      { view: 'client', text: 'Vérifie ta prestation, puis valide.', until: (s) => s.clientNav.screen !== 'confirmed' },
-      { view: 'client', text: 'Ta présence est confirmée.', jump: 'Aller à ton tour', until: (s) => myTicket(s)?.ticket.calledAt !== undefined },
-      { view: 'client', text: 'Touche Scan devant le poste du coiffeur pour démarrer.', until: (s) => myTicket(s)?.ticket.startedAt !== undefined },
-      { view: 'client', text: 'Ta prestation est en cours.', jump: 'Aller à la fin de la prestation', until: (s) => myTicket(s)?.ticket.doneAt !== undefined },
-    ],
+    hint: '8 coiffeurs, 8 cas : parcours normal, premier de la file, retard du coiffeur, tour qui avance, client en retard, après la fermeture, imprévu, walk-in.',
+    steps: [],
   },
 
   'pro-compte': {
@@ -219,8 +204,8 @@ function agentQueueFile(): QueueFile {
   };
 }
 
-function julieFile(): QueueFile {
-  return { id: 'julie', agentName: 'Julie', metier: 'Coiffeuse', prestations: JULIE_PRESTATIONS, pauses: [], open: true, endOfDay: h(19), tickets: [] };
+function mathisFile(): QueueFile {
+  return { id: MATHIS_FILE_ID, agentName: 'Mathis', metier: 'Barbier', prestations: MATHIS_PRESTATIONS, pauses: [], open: true, endOfDay: h(19), tickets: [] };
 }
 
 const k = (name: string, at: number, prestationIds: string[], behavior: Arrival['behavior'] = 'ponctuel'): Arrival => ({
@@ -271,17 +256,17 @@ const JOURNEE: Arrival[] = [
   evening('Martin', h(21, 10), ['crop'], h(23)),
   evening('Alexandre', h(21, 40), ['classique'], h(23)),
   { fileId: AGENT_FILE_ID, name: 'Lucas', prestationIds: ['degrade'], behavior: 'ponctuel', beforeEnd: 40 },
-  { fileId: 'julie', name: 'Claire', prestationIds: ['coupe-f'], behavior: 'ponctuel', at: h(9, 10) },
-  { fileId: 'julie', name: 'Nora', prestationIds: ['brushing', 'enfant'], behavior: 'ponctuel', at: h(9, 30) },
+  { fileId: MATHIS_FILE_ID, name: 'Bastien', prestationIds: ['degrade'], behavior: 'ponctuel', at: h(9, 10) },
+  { fileId: MATHIS_FILE_ID, name: 'Rémi', prestationIds: ['taper', 'barbe-express'], behavior: 'ponctuel', at: h(9, 30) },
 ];
 
 export function buildScenario(id: ScenarioId): SimState {
   const kf = agentQueueFile();
-  const jf = julieFile();
+  const mf = mathisFile();
   const s: SimState = {
     now: h(9),
     weekday: TUESDAY,
-    files: [kf, jf],
+    files: [kf, mf],
     agent: { loggedIn: false, setup: 'done', email: 'antoine@salonleclos.fr', firstName: 'Antoine', lastName: 'Lefèvre', week: defaultWeek() },
     me: { favorites: [], reminderMinutes: 10 },
     clientNav: { screen: 'home' },
@@ -307,21 +292,9 @@ export function buildScenario(id: ScenarioId): SimState {
   }
 
   if (id === 'client') {
-    // Mardi 14h10 : Antoine a repris après le déjeuner, 1 client sur le fauteuil et 2 en attente.
-    s.now = h(14, 10);
+    s.now = SALON_START;
     s.agent.loggedIn = true;
-    kf.open = true;
-    kf.pauses = [
-      { id: 'matin', plannedAt: h(10, 30), minutes: 15, remindedAt: h(10, 30), startedAt: h(10, 30), endedAt: h(10, 45) },
-      { id: 'midi', plannedAt: h(12, 30), minutes: 60, remindedAt: h(12, 40), startedAt: h(12, 40), endedAt: h(13, 40) },
-      { id: 'aprem', plannedAt: h(16), minutes: 15 },
-    ];
-    kf.tickets.push(mkTicket(kf, 'Marius', ['crop'], h(13, 5), 'ponctuel', { confirmedAt: h(13, 50), startedAt: h(14) }));
-    kf.tickets.push(mkTicket(kf, 'Enzo', ['buzz', 'barbe-express'], h(13, 20), 'ponctuel'));
-    kf.tickets.push(mkTicket(kf, 'Arthur', ['slick'], h(13, 45), 'ponctuel'));
-    jf.tickets.push(mkTicket(jf, 'Claire', ['coupe-f'], h(13, 40), 'ponctuel', { confirmedAt: h(13, 50), startedAt: h(14, 5) }));
-    jf.tickets.push(mkTicket(jf, 'Nora', ['brushing', 'enfant'], h(13, 55), 'ponctuel'));
-    s.script = [k('Noah', h(14, 50), ['pompadour']), k('Maxime', h(15, 30), ['taper'])];
+    s.files = salonFiles();
   }
 
   if (id === 'pro-compte') {
@@ -337,7 +310,7 @@ export function buildScenario(id: ScenarioId): SimState {
 
 export type GuideAction = Action | { type: 'scenario'; id: ScenarioId } | { type: 'jump' };
 
-export const stepsOf = (s: SimState) => SCENARIOS[s.scenario.id].steps;
+export const stepsOf = (s: SimState) => (s.scenario.id === 'client' ? salonSteps(s) : SCENARIOS[s.scenario.id].steps);
 export const currentStep = (s: SimState): Step | undefined => stepsOf(s)[s.scenario.beat];
 
 /** Le reducer de la démo : celui du moteur, plus le chargement d'un scénario et l'avancée du guide. */
@@ -355,6 +328,7 @@ export function guideReducer(state: SimState, a: GuideAction): SimState {
       syncClock(state, s);
     }
   } else s = reducer(state, a);
+  if (s.scenario.id === 'client') s = salonHook(s);
 
   // Une étape se valide seule dès que sa condition est vraie, que ce soit par un saut ou à la main.
   const steps = stepsOf(s);

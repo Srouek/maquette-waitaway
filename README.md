@@ -65,7 +65,20 @@ Un walk-in que le coiffeur ajoute sans qu'il rattache son ticket reste « En rou
 
 ### Client : je m'inscris
 
-Mardi 14h10. Le client scanne le QR code du salon, choisit Antoine, 1 ou plusieurs prestations, crée son compte (Google ou e-mail), règle son rappel, arrive sur son compte, confirme sa présence par le bouton Scan, puis démarre sa prestation. Dans ce scénario, Antoine prend sa pause seul.
+Mardi 9h40, dans le salon. Le client scanne le QR code de l'entrée et voit 8 coiffeurs. Chacun montre 1 cas, indiqué par une étiquette sous son nom. Choisir un coiffeur lance son cas. Le téléphone du coiffeur est caché : le scénario ne montre que ce que le client reçoit ou fait. Tant qu'il n'a pas de ticket, le client peut revenir au salon et essayer un autre coiffeur. Le cas va jusqu'à la fin de la prestation, sauf quand le ticket disparaît.
+
+| Coiffeur | Cas | Ce que le client vit |
+|---|---|---|
+| Antoine | Parcours normal | Inscription vers 10h20, rappel, Scan pour confirmer, « C'est ton tour », Scan du poste, prestation |
+| Mathis | Premier de la file | Tour dans moins de 10 min : confirmé dès l'inscription (S38). Il scanne le poste, ou quitte la file |
+| Julien | Retard du coiffeur | 9h48 : « Julien annonce 10 min de retard », nouvelle heure. 10h15 : « Julien a 5 min de retard ». S'il a déjà confirmé, il ne reçoit rien (S20) |
+| Thomas | Le tour avance | 10h00 : un client devant lui quitte la file, « Ton tour avance de 30 min » |
+| Nicolas | Client en retard | Il reçoit le rappel mais ne revient pas. 3 min après son tour : « Nicolas a retiré ton ticket », motif « Client absent » (S37, S23) |
+| Damien | Après la fermeture | Damien ferme à 10h15 : « Demander une place », Damien accepte 2 min après, la place vaut confirmation. Au-delà de 30 min après la fermeture, refus d'office (QA-20, QA-30) |
+| Bruno | Imprévu | 10h00 : « Bruno a dû fermer sa file », ticket retiré (QA-33) |
+| Maxence | Walk-in | Le client est entré sans scanner, Maxence lui a créé un ticket. Il scanne le QR code du ticket, choisit ses prestations, crée son compte. Son tour est dans 10 min ou plus : il n'est plus confirmé et repasse par le rappel (QA-27) |
+
+Le scan du poste trop tôt est refusé partout, avec la raison (S14). Dès que la prestation est terminée, le client reçoit un questionnaire de satisfaction : une note de 1 à 5 étoiles et un commentaire facultatif, ou « Plus tard ».
 
 ### Coiffeur : je crée mon compte
 
@@ -90,6 +103,9 @@ E-mail et code reçu par e-mail, profil, choix des prestations et de leur durée
 | Coiffeur | Alerte `customer.late` : attendre, walk-in, client présent, retirer | S37 |
 | Coiffeur | Walk-in par ticket anonyme, à durée libre, avec QR code | S44, QA-27 |
 | Coiffeur | Fermeture de file depuis l'application, refusée tant que des clients attendent | QA-28 |
+| Client | Questionnaire de satisfaction à la fin de la prestation : note de 1 à 5, commentaire facultatif | QA-34, épic à cadrer |
+| Client | Dépassement : notification de 5 min de retard, une fois constatées, aux clients non confirmés dont le tour est dans moins de 30 min | S20 |
+| Client | Notification quand son tour avance d'au moins 5 min | Hors backlog |
 
 ## Écarts avec le backlog
 
@@ -101,7 +117,11 @@ La maquette s'écarte de QueueAPI sur ces points. Chacun a son commentaire dans 
 | Place d'une pause | Décidée 1 fois, puis figée (`beforeTicketId`) | Recalculée à chaque requête : la pause peut sauter derrière un client qui arrive en position 1. À trancher dans E6-7 |
 | Rappel de pause | Envoyé quand le créneau calculé arrive | Envoyé à l'heure souhaitée (S24) |
 | Fin de journée | Fin de journée passée et plus personne en service ni en attente : notification « Plus personne n'attend » au coiffeur, et le temps s'arrête | Pas de notification (QA-28). La file se ferme d'office à minuit |
-| Fin d'une prestation | Seule, quand sa durée est écoulée | Au démarrage du suivant, à la pause ou à la fermeture. Le dépassement (E6-4) n'est pas montré |
+| Fin d'une prestation | Seule, quand sa durée est écoulée, ou plus tard si le scénario la fait dépasser | Au démarrage du suivant, à la pause ou à la fermeture |
+| Dépassement | Notification dans l'application seulement, et seul le téléphone client la reçoit | Aussi en push, à tous les clients concernés (S20) |
+| Tour qui avance | Le client est prévenu dès que son tour avance d'au moins 5 min | Rien de prévu. À ajouter au backlog |
+| Questionnaire de satisfaction | Envoyé dès que la prestation est close : démarrage du client suivant, pause ou fermeture de file, ou fin de sa durée (la maquette ferme seule une prestation finie) | QA-34, épic à cadrer : qui voit les notes n'est pas décidé, la maquette ne les montre à personne |
+| Coiffeurs du scénario client | Personne ne les joue : leurs gestes sont prévus (`agentEvents` dans `src/sim/salon.ts`). Une demande après la fermeture est acceptée 2 min après | Le coiffeur décide |
 | Connexion du coiffeur | Code reçu par e-mail | Mot de passe (`06-CONTRAT-API.md`) |
 | Prestations du coiffeur | Choisies dans un catalogue | Soumises par l'agent, validées par le gérant (S19) |
 | Prestations favorites | Affichées sur le compte | Classées « hors démo » (QA-10) |

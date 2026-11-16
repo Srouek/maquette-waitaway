@@ -3,8 +3,8 @@ import { agentLate } from './engine';
 import { buildScenario, guideReducer, type GuideAction } from './scenarios';
 import type { SimState } from './types';
 
-// v3 : prénoms des clients et identifiant de la file du coiffeur changés. Un état plus ancien est ignoré.
-const KEY = 'waitaway-demo-v3';
+// v6 : scénario client à 8 coiffeurs (1 cas par coiffeur), événements des coiffeurs simulés, walk-in côté client. Un état plus ancien est ignoré.
+const KEY = 'waitaway-demo-v6';
 
 function load(): SimState {
   try {

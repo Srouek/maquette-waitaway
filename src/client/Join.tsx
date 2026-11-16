@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { byGroup } from '../agent/OpenWizard';
 import { STORE } from '../sim/data';
-import { canJoin, durationOf, fileById, fmt, inService, overtimeEnd, projectedStart, totalWait, waiting } from '../sim/engine';
+import { canJoin, durationOf, fileById, fmt, inService, overtimeEnd, projectedStart, timeline, totalWait, waiting } from '../sim/engine';
 import { useSim } from '../sim/store';
 import { PrestationIcon, StarIcon } from '../ui/icons';
 
@@ -29,6 +29,7 @@ export function StorePage() {
                 <span className="file-who">
                   <strong>{f.agentName}</strong>
                   <span className="muted">{f.metier}</span>
+                  {f.demoTag && <span className="demo-tag">{f.demoTag}</span>}
                 </span>
                 {f.open ? (
                   <span className="file-wait">
@@ -48,31 +49,38 @@ export function StorePage() {
   );
 }
 
-export function Choose({ fileId, preselect, tried }: { fileId: string; preselect?: string[]; tried: boolean }) {
+/**
+ * Choix des prestations. Avec `claim`, le client est un walk-in qui vient de scanner le QR code de son ticket
+ * (QA-27) : il garde sa place dans la file, et sa durée devient celle des prestations choisies.
+ */
+export function Choose({ fileId, preselect, tried, claim }: { fileId: string; preselect?: string[]; tried: boolean; claim?: boolean }) {
   const { s, dispatch } = useSim();
   const f = fileById(s, fileId);
   const [ids, setIds] = useState<string[]>(preselect ?? []);
   const toggle = (id: string) => setIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
   const dur = durationOf(f, ids);
-  const start = projectedStart(f, s.now, dur);
-  const error = canJoin(s, fileId, ids);
-  const over = ids.length > 0 && !error ? overtimeEnd(f, s.now, ids) : undefined;
+  const walkInSlot = claim ? timeline(f, s.now).find((x) => x.kind === 'ticket' && x.ticket.id === s.me.walkIn?.ticketId) : undefined;
+  const start = walkInSlot ? walkInSlot.start : projectedStart(f, s.now, dur);
+  const error = claim ? (ids.length === 0 ? 'Choisis au moins une prestation.' : null) : canJoin(s, fileId, ids);
+  const over = ids.length > 0 && !error && !claim ? overtimeEnd(f, s.now, ids) : undefined;
 
   const join = () => {
-    if (error) return dispatch({ type: 'nav', nav: { screen: 'choose', fileId, tried: true } });
-    if (!s.me.firstName) return dispatch({ type: 'nav', nav: { screen: 'signup', fileId, prestationIds: ids } });
-    dispatch({ type: 'join', fileId, prestationIds: ids });
+    if (error) return dispatch({ type: 'nav', nav: { screen: 'choose', fileId, tried: true, ...(claim ? { claim: true as const } : {}) } });
+    if (!s.me.firstName) return dispatch({ type: 'nav', nav: { screen: 'signup', fileId, prestationIds: ids, ...(claim ? { claim: true as const } : {}) } });
+    dispatch(claim ? { type: 'claim', prestationIds: ids } : { type: 'join', fileId, prestationIds: ids });
   };
 
   return (
     <main className="screen with-footer">
-      <button className="back" onClick={() => dispatch({ type: 'nav', nav: { screen: 'store' } })}>
+      <button className="back" onClick={() => dispatch({ type: 'nav', nav: { screen: claim ? 'home' : 'store' } })}>
         Retour
       </button>
       <h1 className="title">Avec {f.agentName}</h1>
       <p className="muted">
-        {totalWait(f, s.now)} min d&rsquo;attente en ce moment. Les durées sont celles de {f.agentName}.
+        {claim
+          ? `${f.agentName} t’a gardé une place. Choisis tes prestations : la durée de ta place devient la leur.`
+          : `${totalWait(f, s.now)} min d’attente en ce moment. Les durées sont celles de ${f.agentName}.`}
       </p>
 
       {byGroup(f.prestations).map((g) => (
@@ -126,17 +134,17 @@ export function Choose({ fileId, preselect, tried }: { fileId: string; preselect
           </span>
         </div>
         <button className="btn btn-primary btn-lg" onClick={join}>
-          {over !== undefined ? 'Demander une place' : 'Prendre ma place'}
+          {claim ? 'Récupérer ma place' : over !== undefined ? 'Demander une place' : 'Prendre ma place'}
         </button>
       </footer>
     </main>
   );
 }
 
-const EXAMPLE = { lastName: 'Girard', firstName: 'Romain', email: 'romain.girard@exemple.fr', password: 'coiffure2026', confirm: 'coiffure2026' };
+const EXAMPLE = { lastName: 'Rousseau', firstName: 'Gabriel', email: 'gabriel.rousseau@exemple.fr', password: 'coiffure2026', confirm: 'coiffure2026' };
 
 /** Création du compte au moment de s'inscrire dans la file : Google, ou formulaire par e-mail (E2-0). */
-export function Signup({ fileId, prestationIds }: { fileId: string; prestationIds: string[] }) {
+export function Signup({ fileId, prestationIds, claim }: { fileId: string; prestationIds: string[]; claim?: boolean }) {
   const { dispatch } = useSim();
   const [byMail, setByMail] = useState(false);
   const [form, setForm] = useState({ lastName: '', firstName: '', email: '', password: '', confirm: '' });
@@ -154,9 +162,9 @@ export function Signup({ fileId, prestationIds }: { fileId: string; prestationId
 
   const finish = (firstName: string, lastName: string, email: string) => {
     dispatch({ type: 'signup', firstName, lastName, email });
-    dispatch({ type: 'join', fileId, prestationIds });
+    dispatch(claim ? { type: 'claim', prestationIds } : { type: 'join', fileId, prestationIds });
   };
-  const back = () => dispatch({ type: 'nav', nav: { screen: 'choose', fileId, preselect: prestationIds } });
+  const back = () => dispatch({ type: 'nav', nav: { screen: 'choose', fileId, preselect: prestationIds, ...(claim ? { claim: true as const } : {}) } });
 
   if (!byMail)
     return (
@@ -168,7 +176,7 @@ export function Signup({ fileId, prestationIds }: { fileId: string; prestationId
         <p className="muted">Il garde ta place et te prévient quand ton tour approche.</p>
         <div className="actions">
           {/* Écart : la connexion Google ne renvoie pas encore de token utilisable (QA-13). */}
-          <button className="btn btn-outline btn-lg" onClick={() => finish(EXAMPLE.firstName, EXAMPLE.lastName, 'romain.girard@gmail.com')}>
+          <button className="btn btn-outline btn-lg" onClick={() => finish(EXAMPLE.firstName, EXAMPLE.lastName, 'gabriel.rousseau@gmail.com')}>
             <span className="google" aria-hidden>
               G
             </span>

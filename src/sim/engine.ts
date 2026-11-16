@@ -1,6 +1,6 @@
 import { CATALOG } from './catalog';
 import { AGENT_FILE_ID, PAUSE_LABEL, mkTicket } from './data';
-import type { ClientNav, DayPlan, Pause, PauseId, PausePlan, QueueFile, SimState, Ticket } from './types';
+import type { AgentEvent, ClientNav, DayPlan, Pause, PauseId, PausePlan, QueueFile, SimState, Ticket } from './types';
 
 // ---------- Sélecteurs ----------
 
@@ -19,7 +19,7 @@ export const waiting = (f: QueueFile) =>
  * Les autres files gardent le refus automatique : personne ne joue leur coiffeur.
  */
 export const OVERTIME_MAX = 30;
-export const decidesOvertime = (f: QueueFile) => f.id === AGENT_FILE_ID;
+export const decidesOvertime = (f: QueueFile) => f.id === AGENT_FILE_ID || f.decidesOvertime === true;
 
 /** Demandes d'inscription après la fermeture, en attente de la réponse de l'agent. */
 export const pendingOvertime = (f: QueueFile) => f.tickets.filter((t) => t.overtime === 'pending' && t.abortAt === undefined);
@@ -27,12 +27,38 @@ export const pendingOvertime = (f: QueueFile) => f.tickets.filter((t) => t.overt
 export const inService = (f: QueueFile) =>
   f.tickets.find((t) => t.startedAt !== undefined && t.doneAt === undefined && t.abortAt === undefined);
 
-/** Minutes restantes de la prestation en cours (négatif = dépassement). */
+/** Fin estimée d'une prestation démarrée : sa durée, plus le dépassement déjà annoncé. */
+export const serviceEnd = (t: Ticket) => t.startedAt! + t.duration + (t.overrun ?? 0);
+
+/** S20 : seuls les clients pas encore confirmés dont le tour est dans moins de 30 min sont prévenus d'un retard. */
+export const OVERRUN_NOTIFY_WINDOW = 30;
+/** Tranche de dépassement automatique. */
+export const OVERRUN_STEP = 5;
+
+/** Les clients à prévenir d'un retard sur la prestation en cours. Les confirmés sont au salon et voient le coiffeur travailler. */
+export const overrunTargets = (f: QueueFile, now: number) =>
+  waiting(f).filter((t) => !t.anonymous && t.confirmedAt === undefined && waitFor(f, t.id, now) < OVERRUN_NOTIFY_WINDOW);
+
+/** S20 : à partir de 2 dépassements dans la journée, le système suggère d'allonger la prestation de 5 min. */
+export const SUGGEST_AFTER = 2;
+export const durationSuggestions = (f: QueueFile) =>
+  Object.entries(f.overruns ?? {})
+    .filter(([, n]) => n >= SUGGEST_AFTER)
+    .flatMap(([id, n]) => {
+      const p = f.prestations.find((x) => x.id === id);
+      return p ? [{ id, label: p.label, count: n, from: p.minutes, to: p.minutes + OVERRUN_STEP }] : [];
+    });
+
+/** Minutes restantes sur la durée estimée de la prestation en cours (négatif = dépassement). Pour l'écran du coiffeur. */
 export const remainingRaw = (f: QueueFile, now: number) => {
   const t = inService(f);
   return t ? t.startedAt! + t.duration - now : 0;
 };
-export const remaining = (f: QueueFile, now: number) => Math.max(0, remainingRaw(f, now));
+/** Minutes avant la fin estimée de la prestation en cours, dépassement annoncé compris. */
+export const remaining = (f: QueueFile, now: number) => {
+  const t = inService(f);
+  return t ? Math.max(0, serviceEnd(t) - now) : 0;
+};
 
 export const runningPause = (f: QueueFile) => f.pauses.find((p) => p.startedAt !== undefined && p.endedAt === undefined);
 
@@ -87,7 +113,7 @@ function plan(f: QueueFile, now: number, extra?: number) {
   const cur = inService(f);
   const run = runningPause(f);
   let cursor = now;
-  if (cur) cursor = Math.max(cursor, cur.startedAt! + cur.duration);
+  if (cur) cursor = Math.max(cursor, serviceEnd(cur));
   if (run) {
     const end = Math.max(now, pauseEnd(run));
     slots.push({ kind: 'pause', pause: run, start: run.startedAt!, end });
@@ -253,6 +279,8 @@ export type Action =
   | { type: 'confirm' }
   | { type: 'clientStart' }
   | { type: 'leave' }
+  | { type: 'claim'; prestationIds: string[] }
+  | { type: 'rate'; stars?: number; comment?: string }
   | { type: 'clearMyTicket' }
   | { type: 'setReminder'; minutes: number }
   | { type: 'agentLogin'; email: string }
@@ -265,6 +293,8 @@ export type Action =
   | { type: 'skipPause'; id: PauseId }
   | { type: 'resume' }
   | { type: 'declareDelay'; minutes: number }
+  | { type: 'announceOverrun'; minutes: number }
+  | { type: 'applySuggestion'; id: string; accept: boolean }
   | { type: 'incidentClose' }
   | { type: 'decideOvertime'; ticketId: string; accept: boolean }
   | { type: 'reject'; ticketId: string; motif: string }
@@ -281,15 +311,23 @@ function notify(s: SimState, to: 'client' | 'agent', title: string, body: string
 
 const isMine = (s: SimState, t: Ticket) => s.me.ticketRef?.ticketId === t.id;
 
-function finish(s: SimState, t: Ticket) {
+function finish(s: SimState, f: QueueFile, t: Ticket) {
   t.doneAt = s.now;
-  if (isMine(s, t)) notify(s, 'client', 'Prestation terminée', `Durée réelle : ${s.now - t.startedAt!} min. Merci et à bientôt !`);
+  // S20 : un dépassement compte dès qu'un retard a été notifié ou annoncé. Il compte pour chaque prestation du ticket.
+  if ((t.overrun ?? 0) >= OVERRUN_STEP) {
+    f.overruns ??= {};
+    for (const id of t.prestationIds) f.overruns[id] = (f.overruns[id] ?? 0) + 1;
+  }
+  // Questionnaire de satisfaction : hors backlog, décision de Gabi le 16/11/2026. Il part dès que la prestation est
+  // close, quelle que soit la clôture : démarrage du client suivant, pause, fermeture de file. Dans la maquette,
+  // une prestation se ferme aussi seule à la fin de sa durée (voir `act`).
+  if (isMine(s, t)) notify(s, 'client', 'Prestation terminée', `Comment ça s’est passé avec ${f.agentName} ? Donne ton avis en 30 secondes.`);
 }
 
 /** Démarre `t`. Clôture enchaînée : la prestation en cours se termine. Une pause en cours aussi. */
 function startTicket(s: SimState, f: QueueFile, t: Ticket) {
   const prev = inService(f);
-  if (prev) finish(s, prev);
+  if (prev) finish(s, f, prev);
   const run = runningPause(f);
   if (run) run.endedAt = s.now;
   t.startedAt = s.now;
@@ -308,7 +346,7 @@ function rejectTicket(s: SimState, f: QueueFile, t: Ticket, motif: string) {
 /** Démarrer sa pause avec un client en service clôt cette prestation (S24). */
 function beginPause(s: SimState, f: QueueFile, p: Pause) {
   const cur = inService(f);
-  if (cur) finish(s, cur);
+  if (cur) finish(s, f, cur);
   p.startedAt = s.now;
   p.remindedAt ??= s.now;
   s.notifs = s.notifs.filter((n) => n.to !== 'agent');
@@ -345,18 +383,165 @@ function askOvertime(s: SimState, t: Ticket, end: number) {
   notify(s, 'agent', `${t.name} demande une place après ta fermeture`, `Il finirait vers ${fmt(end)}. Accepte ou refuse.`);
 }
 
+/**
+ * QA-33 (E6-9, S25) : fermeture sur incident. Contrairement à la fermeture normale (QA-28), elle sort tous les
+ * clients de la file, qui sont prévenus (queue.closed.incident).
+ */
+function closeOnIncident(s: SimState, f: QueueFile) {
+  const cur = inService(f);
+  if (cur) finish(s, f, cur);
+  const run = runningPause(f);
+  if (run) run.endedAt = s.now;
+  for (const t of f.tickets.filter((x) => x.startedAt === undefined && x.abortAt === undefined)) {
+    t.abortAt = s.now;
+    t.abortReason = 'incident';
+    t.rejectMotif = `Un imprévu oblige ${f.agentName} à fermer sa file pour aujourd’hui.`;
+    if (isMine(s, t)) notify(s, 'client', `${f.agentName} a dû fermer sa file`, t.rejectMotif);
+  }
+  f.open = false;
+  f.closedAt = s.now;
+  f.incident = true;
+  s.playing = false;
+  if (s.lateAlert?.fileId === f.id) s.lateAlert = undefined;
+  if (f.id === AGENT_FILE_ID) s.notifs = s.notifs.filter((n) => n.to !== 'agent');
+  f.tickets = f.tickets.filter((t) => isMine(s, t));
+  f.pauses = [];
+}
+
+/**
+ * S20 : l'agent sait que sa prestation sera longue et annonce le retard en 1 geste. Comme `declareDelay`, il
+ * compte à partir de maintenant, ou de la fin estimée si elle n'est pas encore passée. 1 seule notification ;
+ * les notifications automatiques reprennent 5 min après la nouvelle fin estimée.
+ */
+function announceOverrun(s: SimState, f: QueueFile, minutes: number) {
+  const cur = inService(f);
+  if (!cur) return;
+  const end = Math.max(s.now, serviceEnd(cur)) + minutes;
+  cur.overrun = end - cur.startedAt! - cur.duration;
+  const mine = overrunTargets(f, s.now).find((t) => isMine(s, t));
+  if (mine) {
+    mine.eta = s.now + waitFor(f, mine.id, s.now);
+    notify(s, 'client', `${f.agentName} annonce ${minutes} min de retard`, `Sa prestation en cours sera plus longue que prévu. Ton tour est estimé vers ${fmt(mine.eta)}.`);
+  }
+}
+
+/**
+ * « Prendre un client présent » (S37) : l'agent crée un ticket anonyme de `minutes` min (S44) et le démarre tout de suite.
+ * Le client en retard `late` garde la position 1, sauf si l'agent le retire en même temps (S23).
+ */
+function takePresentClient(s: SimState, f: QueueFile, minutes: number, late?: Ticket, rejectLate?: boolean) {
+  const n = f.tickets.filter((t) => t.anonymous).length + 1;
+  const t = mkTicket(f, `Walk-in ${n}`, [], s.now, 'ponctuel', { anonymous: true, walkIn: true, duration: minutes, confirmedAt: s.now });
+  f.tickets.push(t);
+  startTicket(s, f, t);
+  if (late && rejectLate) rejectTicket(s, f, late, 'Client absent');
+  else if (late) late.lateDecidedAt = s.now;
+  if (s.lateAlert?.fileId === f.id) s.lateAlert = undefined;
+}
+
+/**
+ * QA-27, règles 3 et 4 : le walk-in scanne le QR code de son ticket. Le ticket prend son nom et ses prestations,
+ * et sa durée devient celle des prestations.
+ * Règle 11 et S44, décision de Gabi le 16/11/2026 : avec l'application, le client peut sortir du salon sans prévenir.
+ * Sa confirmation est retirée et il repasse par le parcours normal : rappel, rescan de l'entrée, signalement de retard.
+ * Comme en S38, il reste confirmé si son tour est à moins de 10 min.
+ */
+function claimTicket(s: SimState, f: QueueFile, t: Ticket, name: string, prestationIds: string[]) {
+  t.name = name;
+  t.prestationIds = prestationIds;
+  t.duration = durationOf(f, prestationIds);
+  t.anonymous = false;
+  t.claimedAt = s.now;
+  if (waitFor(f, t.id, s.now) >= 10) t.confirmedAt = undefined;
+}
+
+/** Les gestes prévus des coiffeurs simulés (scénarios client). */
+function runAgentEvents(s: SimState) {
+  if (!s.agentEvents?.length) return;
+  const m = myTicket(s);
+  const fired: AgentEvent[] = [];
+  for (const e of s.agentEvents) {
+    const f = fileById(s, e.fileId);
+    if (!f.open) continue;
+    if (e.afterMyTurn !== undefined) {
+      const mineFirst = m && m.file.id === f.id && waiting(f)[0]?.id === m.ticket.id && m.ticket.confirmedAt === undefined;
+      const ready = mineFirst && !inService(f) && !runningPause(f);
+      if (!ready) {
+        e.armedAt = undefined;
+        continue;
+      }
+      e.armedAt ??= s.now;
+      if (s.now - e.armedAt < e.afterMyTurn) continue;
+    } else if (e.at === undefined || s.now < e.at) continue;
+    fired.push(e);
+    if (e.do === 'leave') {
+      const t = waiting(f).find((x) => x.name === e.name);
+      if (t) {
+        t.abortAt = s.now;
+        t.abortReason = 'self';
+      }
+    } else if (e.do === 'announce') announceOverrun(s, f, e.minutes ?? OVERRUN_STEP);
+    else if (e.do === 'incident') closeOnIncident(s, f);
+    else if (e.do === 'replaceMine' && m && m.file.id === f.id) takePresentClient(s, f, e.minutes ?? 30, m.ticket, true);
+  }
+  s.agentEvents = s.agentEvents.filter((e) => !fired.includes(e));
+}
+
+/** Scénarios client : minutes avant qu'un coiffeur simulé accepte une demande après la fermeture. */
+const OVERTIME_AUTO_DELAY = 2;
+
 /** Minutes entre le scan de reprise de l'agent et le scan du poste par le client confirmé en position 1. */
 const RESUME_DELAY = 2;
 
 /** Vrai quand c'est la personne qui fait la démo qui tient le téléphone de ce coiffeur. */
 const playedByUser = (s: SimState, f: QueueFile) => !s.autoAgent && f.id === AGENT_FILE_ID;
 
+/**
+ * Dépassement (`service.overrun`, S20 revu le 16/11/2026). Quand la prestation en cours dépasse de 5 min sa durée
+ * estimée (retard annoncé compris), le retard est constaté : 5 min s'ajoutent à la durée estimée et les clients
+ * concernés sont prévenus (`overrunTargets`). Puis toutes les 5 min tant qu'elle n'est pas finie. L'agent n'a rien à faire.
+ * Entre 2 seuils, le temps d'attente glisse minute par minute (`plan` part de `now` quand la fin estimée est passée).
+ * Écart : S20 envoie aussi la notification en push. La maquette n'a que des notifications dans l'application,
+ * et seul le client du téléphone les reçoit : les autres n'ont pas d'écran.
+ */
+function watchOverrun(s: SimState, f: QueueFile) {
+  const cur = inService(f);
+  if (!cur || s.now < serviceEnd(cur) + OVERRUN_STEP) return;
+  cur.overrun = (cur.overrun ?? 0) + OVERRUN_STEP;
+  if (overrunTargets(f, s.now).some((t) => isMine(s, t)))
+    notify(
+      s,
+      'client',
+      `${f.agentName} a ${OVERRUN_STEP} min de retard`,
+      'Sa prestation en cours dure plus longtemps que prévu. Prends ton temps : ton tour arrive dès qu’il a fini.',
+    );
+}
+
+/** Le client est prévenu quand son tour avance d'au moins `GAIN_MIN` min. */
+const GAIN_MIN = 5;
+
+/**
+ * Le tour du client avance : quelqu'un devant lui a quitté la file, ou une prestation plus courte a pris sa place.
+ * Ce n'est pas dans le backlog : décision de Gabi le 16/11/2026. Un recul ne prévient pas : seuls le dépassement
+ * et le retard de pause annoncé le font.
+ */
+function watchGain(s: SimState, f: QueueFile) {
+  const mine = waiting(f).find((t) => isMine(s, t));
+  if (!mine) return;
+  const eta = s.now + waitFor(f, mine.id, s.now);
+  if (mine.eta === undefined || eta > mine.eta) mine.eta = eta;
+  else if (eta <= mine.eta - GAIN_MIN) {
+    notify(s, 'client', `Ton tour avance de ${mine.eta - eta} min`, `La file a avancé plus vite que prévu. Ton tour est estimé vers ${fmt(eta)}.`);
+    mine.eta = eta;
+  }
+}
+
 /** Ce que font les clients simulés à l'heure courante. */
 function act(s: SimState, f: QueueFile) {
-  // Écart : ici, une prestation se termine seule quand sa durée est écoulée. Dans QueueAPI, c'est le
-  // démarrage du suivant, la pause ou la fermeture qui la clôt. Le dépassement (E6-4) n'est pas montré.
+  // Écart : ici, une prestation se termine seule quand sa durée est écoulée, plus `extra` si le scénario la fait
+  // dépasser. Dans QueueAPI, c'est le démarrage du suivant, la pause ou la fermeture qui la clôt.
   const cur = inService(f);
-  if (cur && s.now >= cur.startedAt! + cur.duration) finish(s, cur);
+  if (cur && s.now >= cur.startedAt! + cur.duration + (cur.extra ?? 0)) finish(s, f, cur);
   // Personne ne tient le téléphone de ce coiffeur : sa pause finit seule, à l'heure.
   const over = pauseOverdue(f, s.now);
   if (over && !playedByUser(s, f)) over.endedAt = s.now;
@@ -365,8 +550,8 @@ function act(s: SimState, f: QueueFile) {
   if (runningPause(f)) return;
   // Le client confirmé voit le coiffeur revenir : il scanne le poste 2 min après le scan de reprise.
   if (f.pauses.some((p) => p.resumedAt !== undefined && s.now - p.resumedAt < RESUME_DELAY)) return;
-  // Le client simulé en position 1 scanne le QR du poste dès que le poste est libre.
   const u1 = waiting(f)[0];
+  // Le client simulé en position 1 scanne le QR du poste dès que le poste est libre.
   if (u1 && !isMine(s, u1) && !u1.anonymous && u1.confirmedAt !== undefined) startTicket(s, f, u1);
 }
 
@@ -401,29 +586,23 @@ function observe(s: SimState, f: QueueFile) {
     f.closeHintAt = s.now;
     notify(s, 'agent', 'Plus personne n’attend', 'Ta journée est finie. Touche « Fermer ma file ».');
   }
-  // QA-27, règles 3 et 4 : le walk-in scanne le QR code de son ticket pendant son attente.
-  // Le ticket prend son nom et ses prestations, et sa durée devient celle des prestations.
+  // Le walk-in simulé scanne le QR code de son ticket pendant son attente (voir `claimTicket`).
   if (s.claim && f.id === AGENT_FILE_ID) {
     const c = s.claim;
     const t = waiting(f).find((x) => x.anonymous && s.now - x.joinedAt >= c.after);
     if (t) {
-      t.name = c.name;
-      t.prestationIds = c.prestationIds;
-      t.duration = durationOf(f, c.prestationIds);
-      t.anonymous = false;
-      t.claimedAt = s.now;
-      // QA-27 règle 11 et S44, décision de Gabi le 16/11/2026 : avec l'application, le client peut sortir du salon
-      // sans prévenir. Sa confirmation est retirée et il repasse par le parcours normal : rappel, rescan de l'entrée,
-      // signalement de retard. Comme en S38, il reste confirmé si son tour est à moins de 10 min.
-      if (waitFor(f, t.id, s.now) >= 10) t.confirmedAt = undefined;
+      claimTicket(s, f, t, c.name, c.prestationIds);
       s.claim = undefined;
       notify(s, 'agent', `Ton walk-in s’est inscrit : ${t.name}`, `${ticketLabel(f, t)}, ${t.duration} min.`);
     }
   }
-  // Scénario client : personne ne joue le coiffeur, il accepte seul les demandes après la fermeture.
-  if (s.autoAgent && f.id === AGENT_FILE_ID) for (const t of pendingOvertime(f)) decideOvertime(s, f, t, true);
-  // Scénario client : personne ne joue le coiffeur, sa pause démarre seule.
-  if (due && s.autoAgent && f.id === AGENT_FILE_ID) beginPause(s, f, due);
+  // Scénarios client : personne ne joue les coiffeurs. Ils acceptent seuls les demandes après la fermeture,
+  // le temps que le client leur en parle.
+  if (s.autoAgent) for (const t of pendingOvertime(f)) if (s.now - t.joinedAt >= OVERTIME_AUTO_DELAY) decideOvertime(s, f, t, true);
+  // Leur pause démarre seule. S'ils dépassent, ils finissent d'abord leur prestation.
+  const cur = inService(f);
+  const busy = cur !== undefined && s.now < cur.startedAt! + cur.duration + (cur.extra ?? 0);
+  if (due && s.autoAgent && !busy) beginPause(s, f, due);
 
   // queue.resumed attendu : la pause est finie, l'agent doit scanner le QR code de son poste.
   const over = pauseOverdue(f, s.now);
@@ -462,9 +641,11 @@ function observe(s: SimState, f: QueueFile) {
       s.lateAlert = { fileId: f.id, ticketId: t.id };
   });
 
+  watchGain(s, f);
+
   // Appel : called.for.service
   const next = waiting(f)[0];
-  const free = remainingRaw(f, s.now) <= 0 && !pauseDue(f, s.now) && !runningPause(f);
+  const free = !inService(f) && !pauseDue(f, s.now) && !runningPause(f);
   if (next && isMine(s, next) && next.calledAt === undefined && free) {
     next.calledAt = s.now;
     notify(s, 'client', 'C’est ton tour', `${f.agentName} est prêt. Touche Scan devant son poste.`);
@@ -473,8 +654,13 @@ function observe(s: SimState, f: QueueFile) {
 
 /** 1 minute simulée. */
 function step(s: SimState) {
-  for (const f of s.files) if (f.open) act(s, f);
+  for (const f of s.files) {
+    if (!f.open) continue;
+    act(s, f);
+    watchOverrun(s, f);
+  }
   s.now += 1;
+  runAgentEvents(s);
   for (const f of s.files) {
     if (!f.open) continue;
     arrive(s, f);
@@ -580,6 +766,26 @@ export function reducer(state: SimState, a: Action): SimState {
       s.clientNav = { screen: 'account' };
       break;
     }
+    case 'claim': {
+      const w = s.me.walkIn;
+      if (!w) break;
+      const f = fileById(s, w.fileId);
+      const t = f.tickets.find((x) => x.id === w.ticketId);
+      if (!t || a.prestationIds.length === 0) break;
+      claimTicket(s, f, t, s.me.firstName ?? 'Toi', a.prestationIds);
+      t.behavior = 'moi';
+      s.me.walkIn = undefined;
+      s.me.ticketRef = { fileId: f.id, ticketId: t.id };
+      s.clientNav = { screen: 'joined' };
+      break;
+    }
+    case 'rate': {
+      // Sans note : le client a choisi « Plus tard ».
+      const m = myTicket(s);
+      if (!m || m.ticket.doneAt === undefined || m.ticket.rating !== undefined) break;
+      m.ticket.rating = a.stars ? { stars: a.stars, comment: a.comment?.trim() || undefined, at: s.now } : 'skipped';
+      break;
+    }
     case 'clearMyTicket':
       s.me.ticketRef = undefined;
       s.clientNav = { screen: 'account' };
@@ -618,6 +824,8 @@ export function reducer(state: SimState, a: Action): SimState {
       f.endOfDay = a.endOfDay;
       f.open = true;
       f.incident = undefined;
+      // Le décompte des dépassements vaut pour 1 journée. Une suggestion sans réponse a été montrée à l'ouverture.
+      f.overruns = undefined;
       f.closedAt = undefined;
       // Ouvrir sa file lance le temps.
       s.playing = true;
@@ -662,30 +870,21 @@ export function reducer(state: SimState, a: Action): SimState {
         notify(s, 'client', `${f.agentName} reprend avec du retard`, `Reprise prévue vers ${fmt(back)}. Ton tour est estimé vers ${fmt(s.now + waitFor(f, mine.id, s.now))}.`);
       break;
     }
-    case 'incidentClose': {
-      // QA-33 (E6-9, S25) : fermeture sur incident. Contrairement à la fermeture normale (QA-28), elle sort tous les
-      // clients de la file, qui sont prévenus (queue.closed.incident).
+    case 'announceOverrun':
+      announceOverrun(s, agentFile(), a.minutes);
+      break;
+    case 'applySuggestion': {
+      // S20 : la suggestion n'est jamais appliquée seule. Acceptée ou non, le compteur de la prestation repart à zéro.
       const f = agentFile();
-      const cur = inService(f);
-      if (cur) finish(s, cur);
-      const run = runningPause(f);
-      if (run) run.endedAt = s.now;
-      for (const t of f.tickets.filter((x) => x.startedAt === undefined && x.abortAt === undefined)) {
-        t.abortAt = s.now;
-        t.abortReason = 'incident';
-        t.rejectMotif = `Un imprévu oblige ${f.agentName} à fermer sa file pour aujourd’hui.`;
-        if (isMine(s, t)) notify(s, 'client', `${f.agentName} a dû fermer sa file`, t.rejectMotif);
-      }
-      f.open = false;
-      f.closedAt = s.now;
-      f.incident = true;
-      s.playing = false;
-      s.lateAlert = undefined;
-      s.notifs = s.notifs.filter((n) => n.to !== 'agent');
-      f.tickets = f.tickets.filter((t) => isMine(s, t));
-      f.pauses = [];
+      const sug = durationSuggestions(f).find((x) => x.id === a.id);
+      if (!sug) break;
+      if (a.accept) f.prestations = f.prestations.map((p) => (p.id === a.id ? { ...p, minutes: sug.to } : p));
+      delete f.overruns![a.id];
       break;
     }
+    case 'incidentClose':
+      closeOnIncident(s, agentFile());
+      break;
     case 'decideOvertime': {
       const f = agentFile();
       const t = f.tickets.find((x) => x.id === a.ticketId);
@@ -723,27 +922,23 @@ export function reducer(state: SimState, a: Action): SimState {
       // confirmé d'office si son tour est dans moins de 10 min, comme en S38. Sinon il est en route, et l'agent
       // confirme sa présence quand son tour approche (règle 12) : le walk-in a pu sortir du salon entre-temps.
       const f = agentFile();
+      s.playing = f.open;
+      if (a.startNow) {
+        takePresentClient(s, f, a.minutes, f.tickets.find((x) => x.id === s.lateAlert?.ticketId), a.rejectLate);
+        s.lateAlert = undefined;
+        break;
+      }
       const n = f.tickets.filter((t) => t.anonymous).length + 1;
       const t = mkTicket(f, `Walk-in ${n}`, [], s.now, 'ponctuel', { anonymous: true, walkIn: true, duration: a.minutes });
       f.tickets.push(t);
-      if (a.startNow || waitFor(f, t.id, s.now) < 10) t.confirmedAt = s.now;
-      s.playing = f.open;
-      if (a.startNow) {
-        // « Prendre un client présent » (S37) : le client en retard garde la position 1,
-        // sauf si l'agent le retire en même temps (S23). Dans les 2 cas, la file est recalculée.
-        const late = f.tickets.find((x) => x.id === s.lateAlert?.ticketId);
-        startTicket(s, f, t);
-        if (late && a.rejectLate) rejectTicket(s, f, late, 'Client absent');
-        else if (late) late.lateDecidedAt = s.now;
-        s.lateAlert = undefined;
-      }
+      if (waitFor(f, t.id, s.now) < 10) t.confirmedAt = s.now;
       break;
     }
     case 'closeFile': {
       const f = agentFile();
       if (waiting(f).length > 0) break;
       const cur = inService(f);
-      if (cur && a.current === 'terminer') finish(s, cur);
+      if (cur && a.current === 'terminer') finish(s, f, cur);
       if (cur && a.current === 'rejeter') rejectTicket(s, f, cur, 'Fin de journée');
       f.open = false;
       f.closedAt = s.now;

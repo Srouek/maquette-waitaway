@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { STORE } from '../sim/data';
 import { fmt, myTicket, prestationsOf, projectedStart, ticketLabel } from '../sim/engine';
 import { useSim } from '../sim/store';
 import type { QueueFile, Ticket } from '../sim/types';
+import { StarIcon } from '../ui/icons';
 import { BarberPole, Toasts, useScan } from '../ui/kit';
 import { Account, Confirmed, Joined } from './Account';
 import { Choose, Signup, StorePage } from './Join';
@@ -22,8 +24,10 @@ export function ClientApp() {
   else if (mine && nav.screen === 'confirmed') screen = <Confirmed file={mine.file} ticket={mine.ticket} />;
   else if (mine) screen = <Account scan={scan.start} />;
   else if (nav.screen === 'store') screen = <StorePage />;
-  else if (nav.screen === 'choose') screen = <Choose key={nav.fileId} fileId={nav.fileId} preselect={nav.preselect} tried={nav.tried === true} />;
-  else if (nav.screen === 'signup') screen = <Signup fileId={nav.fileId} prestationIds={nav.prestationIds} />;
+  else if (nav.screen === 'choose')
+    screen = <Choose key={nav.fileId} fileId={nav.fileId} preselect={nav.preselect} tried={nav.tried === true} claim={nav.claim === true} />;
+  else if (nav.screen === 'signup') screen = <Signup fileId={nav.fileId} prestationIds={nav.prestationIds} claim={nav.claim === true} />;
+  else if (s.me.walkIn) screen = <WalkInHome scan={scan.start} />;
   else if (s.me.firstName) screen = <Account scan={scan.start} />;
   else screen = <Home scan={scan.start} />;
 
@@ -48,6 +52,32 @@ function Home({ scan }: { scan: ScanFn }) {
       <div className="actions">
         <button className="btn btn-primary btn-lg" onClick={() => scan('QR code du salon', () => dispatch({ type: 'nav', nav: { screen: 'store' } }))}>
           Scanner le QR code du salon
+        </button>
+      </div>
+    </main>
+  );
+}
+
+/** Le client est entré sans scanner : le coiffeur lui a créé un ticket et lui montre son QR code (QA-27). */
+function WalkInHome({ scan }: { scan: ScanFn }) {
+  const { s, dispatch } = useSim();
+  const w = s.me.walkIn!;
+  return (
+    <main className="screen home">
+      <Brand />
+      <div className="home-body">
+        <h1 className="display">Ta place est gardée.</h1>
+        <p className="lead">Le coiffeur t&rsquo;a ajouté à sa file. Scanne le QR code de ton ticket pour la retrouver dans l&rsquo;application.</p>
+      </div>
+      <div className="actions">
+        <button
+          className="btn btn-primary btn-lg"
+          onClick={() => scan('QR code de ton ticket', () => dispatch({ type: 'nav', nav: { screen: 'choose', fileId: w.fileId, claim: true } }))}
+        >
+          Scanner le QR code de mon ticket
+        </button>
+        <button className="btn btn-outline btn-lg" onClick={() => dispatch({ type: 'nav', nav: { screen: 'store' } })}>
+          Choisir un autre coiffeur
         </button>
       </div>
     </main>
@@ -87,13 +117,46 @@ function Done({ file, ticket }: { file: QueueFile; ticket: Ticket }) {
       <p className="lead">
         {ticketLabel(file, ticket)} avec {file.agentName}, en {ticket.doneAt! - ticket.startedAt!} min.
       </p>
-      <p className="muted">À bientôt chez {STORE.name}.</p>
+      {ticket.rating === undefined ? (
+        <Survey agentName={file.agentName} />
+      ) : (
+        <p className="muted">{ticket.rating === 'skipped' ? `À bientôt chez ${STORE.name}.` : `Merci pour ton avis. À bientôt chez ${STORE.name}.`}</p>
+      )}
       <div className="actions">
         <button className="btn btn-primary btn-lg" onClick={() => dispatch({ type: 'clearMyTicket' })}>
           Retour à mon compte
         </button>
       </div>
     </main>
+  );
+}
+
+/** Questionnaire de satisfaction, à la fin de la prestation. Hors backlog. */
+function Survey({ agentName }: { agentName: string }) {
+  const { dispatch } = useSim();
+  const [stars, setStars] = useState(0);
+  const [comment, setComment] = useState('');
+  return (
+    <section className="panel survey">
+      <h2 className="section">Comment s&rsquo;est passée ta prestation avec {agentName} ?</h2>
+      <div className="stars" role="radiogroup" aria-label="Note de 1 à 5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} role="radio" aria-checked={stars === n} aria-label={`${n} sur 5`} className={n <= stars ? 'on' : ''} onClick={() => setStars(n)}>
+            <StarIcon on={n <= stars} />
+          </button>
+        ))}
+      </div>
+      <label className="field">
+        Un commentaire ? (facultatif)
+        <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+      </label>
+      <button className="btn btn-primary btn-lg" disabled={stars === 0} onClick={() => dispatch({ type: 'rate', stars, comment })}>
+        Envoyer mon avis
+      </button>
+      <button className="btn btn-outline btn-lg" onClick={() => dispatch({ type: 'rate' })}>
+        Plus tard
+      </button>
+    </section>
   );
 }
 

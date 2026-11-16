@@ -43,6 +43,7 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 │   │   ├── data.ts            # Store, semaine type, pauses par défaut
 │   │   ├── engine.ts          # règles métier, sélecteurs, reducer
 │   │   ├── scenarios.ts       # les 3 scénarios : état de départ, arrivées, étapes du guide
+│   │   ├── salon.ts           # scénario client : 8 coiffeurs, 1 cas chacun, et leurs gestes prévus
 │   │   └── store.tsx          # contexte React, lecture auto, sauvegarde locale
 │   ├── client/
 │   │   ├── ClientApp.tsx      # aiguillage, accueil, prestation en cours, fin
