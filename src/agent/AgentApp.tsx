@@ -5,7 +5,7 @@ import { useSim } from '../sim/store';
 import { Toasts, useScan } from '../ui/kit';
 import { Onboarding } from './Onboarding';
 import { OpenWizard } from './OpenWizard';
-import { QueueScreen } from './Queue';
+import { DurationSuggestions, QueueScreen } from './Queue';
 
 export function AgentApp() {
   const { s } = useSim();
@@ -44,6 +44,7 @@ export function AgentApp() {
           <p className="lead">
             {f.closedAt !== undefined ? `Fermée à ${fmt(f.closedAt)}.` : 'Pour l’ouvrir, scanne le QR code collé à ton poste.'}
           </p>
+          <DurationSuggestions file={f} />
           <p className="muted">
             {DAYS[s.weekday]} : {day.works ? `${fmt(day.start)} à ${fmt(day.end)}, ${f.prestations.length} prestations.` : 'jour de repos dans tes horaires.'}
           </p>

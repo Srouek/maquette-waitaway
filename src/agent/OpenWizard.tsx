@@ -5,6 +5,7 @@ import { fmt, fmtDuration, todayPlan } from '../sim/engine';
 import { useSim } from '../sim/store';
 import type { PausePlan, Prestation, QueueFile } from '../sim/types';
 import { PrestationIcon } from '../ui/icons';
+import { DurationSuggestions } from './Queue';
 import { Stepper, TimeWheel } from '../ui/kit';
 
 /** Prestations rangées par bloc : Coupe, Barbe, Soin. */
@@ -73,6 +74,8 @@ export function OpenWizard({ file, onDone }: { file: QueueFile; onDone: () => vo
       <p className="kicker">Ouverture, étape {page + 1} sur 3</p>
       <h1 className="title">{titles[page]}</h1>
       <p className="muted">{leads[page]}</p>
+
+      {page === 0 && <DurationSuggestions file={file} onApplied={(id, minutes) => setDurations((cur) => ({ ...cur, [id]: minutes }))} />}
 
       {page === 0 &&
         byGroup(file.prestations).map((g) => (

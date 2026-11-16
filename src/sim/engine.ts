@@ -49,10 +49,10 @@ export const durationSuggestions = (f: QueueFile) =>
       return p ? [{ id, label: p.label, count: n, from: p.minutes, to: p.minutes + OVERRUN_STEP }] : [];
     });
 
-/** Minutes restantes sur la durée estimée de la prestation en cours (négatif = dépassement). Pour l'écran du coiffeur. */
+/** Minutes avant la fin estimée de la prestation en cours, dépassement compris (négatif = au-delà). Pour l'écran du coiffeur. */
 export const remainingRaw = (f: QueueFile, now: number) => {
   const t = inService(f);
-  return t ? t.startedAt! + t.duration - now : 0;
+  return t ? serviceEnd(t) - now : 0;
 };
 /** Minutes avant la fin estimée de la prestation en cours, dépassement annoncé compris. */
 export const remaining = (f: QueueFile, now: number) => {
@@ -567,7 +567,7 @@ function arrive(s: SimState, f: QueueFile) {
     const start = projectedStart(f, s.now, dur);
     const over = start + dur > f.endOfDay;
     if (over && (!decidesOvertime(f) || start + dur > f.endOfDay + OVERTIME_MAX)) continue; // QA-20, limite de 30 min
-    const t = mkTicket(f, a.name, a.prestationIds, s.now, a.behavior);
+    const t = mkTicket(f, a.name, a.prestationIds, s.now, a.behavior, a.extra ? { extra: a.extra } : {});
     if (over) askOvertime(s, t, start + dur);
     else if (start - s.now < 10) t.confirmedAt = s.now; // S38
     f.tickets.push(t);

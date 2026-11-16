@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PAUSE_LABEL } from '../sim/data';
 import {
+  durationSuggestions,
   fmt,
   fmtDuration,
   inService,
@@ -9,8 +10,10 @@ import {
   pendingOvertime,
   prestationsOf,
   projectedStart,
+  overrunTargets,
   remainingRaw,
   runningPause,
+  serviceEnd,
   ticketLabel,
   timeline,
   totalWait,
@@ -30,6 +33,7 @@ type Panel =
   | { kind: 'late' }
   | { kind: 'delay'; pause: Pause }
   | { kind: 'incident' }
+  | { kind: 'overrun' }
   | null;
 
 /** Pourquoi la pause ne tombe pas à l'heure souhaitée. `start` : l'heure où elle est placée. */
@@ -206,7 +210,10 @@ export function QueueScreen({ file }: { file: QueueFile }) {
       </footer>
 
       {panel?.kind === 'late' && late && <LateSheet file={file} ticket={late} onClose={() => setPanel(null)} />}
-      {panel?.kind === 'ticket' && <TicketSheet file={file} ticket={panel.ticket} onClose={() => setPanel(null)} />}
+      {panel?.kind === 'ticket' && (
+        <TicketSheet file={file} ticket={panel.ticket} onClose={() => setPanel(null)} onOverrun={() => setPanel({ kind: 'overrun' })} />
+      )}
+      {panel?.kind === 'overrun' && cur && <OverrunSheet file={file} ticket={cur} onClose={() => setPanel(null)} />}
       {panel?.kind === 'pause' && (
         <PauseSheet
           file={file}
@@ -241,7 +248,12 @@ function CurrentCard({ file, ticket, onOpen }: { file: QueueFile; ticket: Ticket
         </span>
         <span className={rem < 0 ? 'over' : ''}>{rem >= 0 ? `encore ${rem} min` : `${-rem} min de plus que prévu`}</span>
       </span>
-      <BarberPole ratio={elapsed / ticket.duration} over={rem < 0} />
+      <BarberPole ratio={elapsed / (ticket.duration + (ticket.overrun ?? 0))} over={rem < 0} />
+      {(ticket.overrun ?? 0) > 0 && (
+        <span className="small over">
+          +{ticket.overrun} min de retard, fin estimée vers {fmt(serviceEnd(ticket))}. Les clients concernés sont prévenus.
+        </span>
+      )}
       {prestations.length > 0 ? (
         <span className="current-prestas">
           {prestations.map((p) => (
@@ -329,6 +341,77 @@ function DelaySheet({ file, pause, onClose }: { file: QueueFile; pause: Pause; o
   );
 }
 
+/**
+ * Dépassement annoncé par l'agent (S20, `service.overrun`) : il sait que la prestation en cours sera plus longue
+ * et prévient en 1 geste. Les notifications automatiques reprennent 5 min après la nouvelle fin estimée.
+ */
+function OverrunSheet({ file, ticket, onClose }: { file: QueueFile; ticket: Ticket; onClose: () => void }) {
+  const { s, dispatch } = useSim();
+  const [minutes, setMinutes] = useState(10);
+  const end = Math.max(s.now, serviceEnd(ticket)) + minutes;
+  const n = overrunTargets(file, s.now).length;
+  return (
+    <Sheet title="Annoncer un retard" onClose={onClose}>
+      <p className="muted">La prestation de {ticket.name} va durer plus longtemps que prévu. De combien ?</p>
+      <DurationWheel label="Retard annoncé" value={minutes} onChange={setMinutes} />
+      <p className="muted small">
+        Fin estimée vers <strong>{fmt(end)}</strong>.{' '}
+        {n > 0
+          ? `${n} ${n > 1 ? 'clients passent' : 'client passe'} dans moins de 30 min sans être encore au salon : ${n > 1 ? 'ils sont prévenus' : 'il est prévenu'}.`
+          : 'Aucun client à prévenir : ceux qui passent bientôt sont déjà au salon.'}{' '}
+        Les heures de toute la file sont recalculées.
+      </p>
+      <button
+        className="btn btn-primary btn-lg"
+        onClick={() => {
+          dispatch({ type: 'announceOverrun', minutes });
+          onClose();
+        }}
+      >
+        Annoncer {minutes} min de retard
+      </button>
+    </Sheet>
+  );
+}
+
+/**
+ * Suggestion d'allonger une prestation qui a dépassé 2 fois dans la journée (S20). Montrée hors service : après la
+ * fermeture, ou à l'ouverture suivante si elle n'a pas eu de réponse. Jamais appliquée seule.
+ */
+export function DurationSuggestions({ file, onApplied }: { file: QueueFile; onApplied?: (id: string, minutes: number) => void }) {
+  const { dispatch } = useSim();
+  const list = durationSuggestions(file);
+  if (list.length === 0) return null;
+  return (
+    <>
+      {list.map((x) => (
+        <section key={x.id} className="panel panel-remind">
+          <p>
+            <strong>
+              Ton {x.label.toLowerCase()} a dépassé {x.count} fois aujourd&rsquo;hui.
+            </strong>{' '}
+            Passer de {x.from} à {x.to} min ?
+          </p>
+          <div className="banner-actions banner-actions-even">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                dispatch({ type: 'applySuggestion', id: x.id, accept: true });
+                onApplied?.(x.id, x.to);
+              }}
+            >
+              Passer à {x.to} min
+            </button>
+            <button className="btn btn-outline" onClick={() => dispatch({ type: 'applySuggestion', id: x.id, accept: false })}>
+              Garder {x.from} min
+            </button>
+          </div>
+        </section>
+      ))}
+    </>
+  );
+}
+
 /** Fermeture sur incident (QA-33) : tous les clients sortent de la file et sont prévenus. */
 function IncidentSheet({ file, onClose }: { file: QueueFile; onClose: () => void }) {
   const { dispatch } = useSim();
@@ -383,7 +466,7 @@ function PauseSheet({ file, pause, onClose, onStart }: { file: QueueFile; pause:
 
 const MOTIFS = ['Client absent', 'Prestation impossible aujourd’hui', 'Comportement'];
 
-function TicketSheet({ file, ticket, onClose }: { file: QueueFile; ticket: Ticket; onClose: () => void }) {
+function TicketSheet({ file, ticket, onClose, onOverrun }: { file: QueueFile; ticket: Ticket; onClose: () => void; onOverrun: () => void }) {
   const { s, dispatch } = useSim();
   const [rejecting, setRejecting] = useState(false);
   // Relire le ticket : il a pu changer depuis l'ouverture du panneau.
@@ -417,6 +500,11 @@ function TicketSheet({ file, ticket, onClose }: { file: QueueFile; ticket: Ticke
             </button>
           )}
           {canTake && !isFirst && <p className="muted small">Les clients devant gardent leur place.</p>}
+          {isCurrent && (
+            <button className="btn btn-outline btn-lg" onClick={onOverrun}>
+              Annoncer un retard
+            </button>
+          )}
           {t.anonymous && t.confirmedAt === undefined && !isCurrent && (
             <button className="btn btn-outline btn-lg" onClick={() => dispatch({ type: 'agentConfirm', ticketId: t.id })}>
               Il est au salon : confirmer

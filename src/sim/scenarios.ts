@@ -1,7 +1,7 @@
 import { CATALOG } from './catalog';
 import { SALON_START, salonFiles, salonHook, salonSteps } from './salon';
 import { AGENT_FILE_ID, MATHIS_FILE_ID, MATHIS_PRESTATIONS, defaultWeek, h } from './data';
-import { advanceUntil, fileById, inService, myTicket, pauseEnd, reducer, remaining, syncClock, waiting, type Action } from './engine';
+import { advanceUntil, durationSuggestions, fileById, inService, myTicket, pauseEnd, reducer, remaining, syncClock, waiting, type Action } from './engine';
 import type { Arrival, PauseId, QueueFile, ScenarioId, SimState } from './types';
 
 /** 1 étape du guide affiché sous la barre de démo. */
@@ -47,6 +47,17 @@ const pauseNear = (s: SimState, id: PauseId) => {
   const p = pause(s, id);
   return !p || p.skipped === true || p.endedAt !== undefined || (p.startedAt !== undefined && s.now >= pauseEnd(p) - 5);
 };
+/** Un client a démarré après le scan de reprise de cette pause. */
+const startedAfterResume = (s: SimState, id: PauseId) => {
+  const p = pause(s, id);
+  return p?.endedAt !== undefined && agentQueue(s).tickets.some((t) => t.startedAt !== undefined && t.startedAt >= p.endedAt!);
+};
+const announceLeo = 'Léo veut un dégradé avec un motif : ce sera plus long que prévu. Touche sa carte et annonce un retard.';
+/** Léo a un retard annoncé ou constaté, ou n'est plus à servir. */
+const leoHandled = (s: SimState) => {
+  const t = ticket(s, 'Léo');
+  return !t || t.doneAt !== undefined || t.abortAt !== undefined || (t.overrun ?? 0) > 0;
+};
 /** L'agent a scanné pour reprendre, ou la pause n'a pas eu lieu. */
 const pauseResumed = (s: SimState, id: PauseId) => {
   const p = pause(s, id);
@@ -66,14 +77,44 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       { view: 'agent', text: 'Ta file est vide.', jump: 'Aller à 9h15 : 1er client', until: (s) => s.now >= h(9, 15) && !!ticket(s, 'Louis') },
       { view: 'agent', text: 'Louis est inscrit, déjà au salon.', jump: 'Louis scanne le QR du poste', until: (s) => ticket(s, 'Louis')?.startedAt !== undefined },
       { view: 'agent', text: 'Sa prestation tourne.', jump: 'Aller à 9h40 : 4 inscriptions', until: (s) => s.now >= h(9, 40) },
-      { view: 'agent', text: 'Regarde où ta pause du matin s’est placée dans la file.', jump: 'Aller à la pause du matin', until: (s) => pauseCalled(s, 'matin') },
+      {
+        view: 'agent',
+        text: 'Regarde où ta pause du matin s’est placée dans la file. Louis va dépasser : à 5 min de dépassement, les clients qui passent bientôt et ne sont pas au salon sont prévenus, sans geste de ta part.',
+        jump: 'Aller à la pause du matin',
+        until: (s) => pauseCalled(s, 'matin'),
+      },
       { view: 'agent', text: scanPause, until: (s) => pauseHandled(s, 'matin') },
       { view: 'agent', text: 'Tu es en pause.', jump: 'Aller à 5 min de la fin de la pause', until: (s) => pauseNear(s, 'matin') },
       { view: 'agent', text: scanResume, until: (s) => pauseResumed(s, 'matin') || !agentQueue(s).open },
-      { view: 'agent', text: 'Adam te voit revenir et scanne le QR du poste : taper fade et barbe.', jump: 'Aller à la pause de midi', until: (s) => pauseCalled(s, 'midi') },
+      {
+        view: 'agent',
+        text: 'Adam te voit revenir et scanne le QR du poste : taper fade et barbe.',
+        jump: 'Aller au tour de Léo',
+        // Après un gros retard le matin, la pause de midi peut passer avant Léo : l'étape suivante saute alors.
+        until: (s) => ticket(s, 'Léo')?.startedAt !== undefined || pauseCalled(s, 'midi'),
+        then: stopClock,
+      },
+      {
+        view: 'agent',
+        text: announceLeo,
+        until: (s) => ticket(s, 'Léo')?.startedAt === undefined || leoHandled(s),
+      },
+      { view: 'agent', text: 'Les clients concernés sont prévenus et la file est recalculée.', jump: 'Aller à la pause de midi', until: (s) => pauseCalled(s, 'midi') },
       { view: 'agent', text: scanPause, until: (s) => pauseHandled(s, 'midi') },
       { view: 'agent', text: 'Tu déjeunes.', jump: 'Aller à 5 min de la reprise', until: (s) => pauseNear(s, 'midi') },
       { view: 'agent', text: scanResume, until: (s) => pauseResumed(s, 'midi') || !agentQueue(s).open },
+      // Si la pause de midi est passée avant Léo (coiffeur en retard le matin), l'annonce de son retard se fait ici.
+      // Sinon ces 2 étapes sautent : Léo a déjà démarré, et son retard est déjà annoncé ou constaté.
+      {
+        view: 'agent',
+        text: 'Léo passe bientôt : sa prestation sera plus longue que prévu.',
+        jump: 'Aller au tour de Léo',
+        until: (s) => ticket(s, 'Léo')?.startedAt !== undefined || leoHandled(s),
+        then: (s) => {
+          if (!leoHandled(s)) stopClock(s);
+        },
+      },
+      { view: 'agent', text: announceLeo, until: leoHandled },
       // Après un retard annoncé le matin, la pause de midi peut passer avant Léo : Théo n'est alors plus le 1er
       // à la reprise. L'étape attend qu'il soit en position 1, poste libre. Sinon, elle saute.
       {
@@ -102,7 +143,16 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       { view: 'agent', text: scanPause, until: (s) => pauseHandled(s, 'aprem') },
       { view: 'agent', text: 'Tu es en pause.', jump: 'Aller à 5 min de la fin de la pause', until: (s) => pauseNear(s, 'aprem') },
       { view: 'agent', text: scanResume, until: (s) => pauseResumed(s, 'aprem') || !agentQueue(s).open },
-      { view: 'agent', text: 'Noah te voit revenir : il scanne le QR du poste dans 2 min.', until: (s) => ticket(s, 'Noah')?.startedAt !== undefined, then: stopClock },
+      // Le 1er client après la reprise dépend du retard pris par le coiffeur. File vide à la reprise : l'étape saute.
+      {
+        view: 'agent',
+        text: 'Le client confirmé te voit revenir : il scanne le QR du poste dans 2 min.',
+        until: (s) =>
+          startedAfterResume(s, 'aprem') ||
+          pause(s, 'aprem')?.skipped === true ||
+          (pauseResumed(s, 'aprem') && !inService(agentQueue(s)) && waiting(agentQueue(s)).every((t) => t.confirmedAt === undefined)),
+        then: stopClock,
+      },
       {
         view: 'agent',
         text: 'Un homme entre sans avoir scanné le QR code. Pour le garder : « Ajouter un client », avec une durée. Il attend son tour au salon.',
@@ -160,6 +210,11 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         view: 'agent',
         text: 'Dernière prestation, 5 min au plus. Touche « Fermer ma file » pour la terminer et fermer, ou attends sa fin : une notification t’invitera à fermer.',
         until: (s) => !agentQueue(s).open,
+      },
+      {
+        view: 'agent',
+        text: 'Ta file est fermée. Ton dégradé a dépassé 2 fois aujourd’hui : réponds à la suggestion.',
+        until: (s) => durationSuggestions(agentQueue(s)).length === 0,
       },
     ],
   },
@@ -220,10 +275,14 @@ const k = (name: string, at: number, prestationIds: string[], behavior: Arrival[
 const evening = (name: string, at: number, prestationIds: string[], minEnd: number): Arrival => ({ ...k(name, at, prestationIds), minEnd });
 
 /**
- * La journée du coiffeur. Avec les réglages par défaut (pauses à 10h30, 12h30 et 16h00, fin à 19h00) :
- * - Adam, inscrit en position 2, chevauche 10h30 : la pause du matin passe avant lui, à 10h10 ;
- * - Léo, inscrit en position 1, chevauche 12h30 : la pause de midi glisse après lui, à 12h40 ;
- * - Théo, 1er après le déjeuner pour 40 min, ne vient jamais : alerte à 13h31, décision à la reprise, 13h40 ;
+ * La journée du coiffeur. Avec les réglages par défaut (pauses à 10h30, 12h30 et 16h00, fin à 19h00), en reprenant
+ * dès chaque saut de fin de pause :
+ * - Louis (dégradé) dure 7 min de plus que prévu : 5 min de retard constatées à 9h50, 1er dépassement (S20) ;
+ * - Adam, inscrit en position 2, chevauche 10h30 : la pause du matin passe avant lui, à 10h17 ;
+ * - Léo (dégradé) démarre à 12h14 et dure 10 min de plus : le coiffeur annonce le retard, 2e dépassement ;
+ * - Léo, en position 1, chevauche 12h30 : la pause de midi glisse après lui, à 12h54 ;
+ * - Théo, 1er après le déjeuner pour 40 min, ne vient jamais : décision à la reprise, 13h49 ;
+ * - après la fermeture, la suggestion propose de passer le dégradé de 30 à 35 min ;
  * - le poste est libre à 16h00 : la pause de l'après-midi tombe à l'heure ;
  * - Kylian finit pile à la fermeture. Lucas, inscrit à 18h20, finirait à 19h30 : le coiffeur accepte ou refuse ;
  * - après 16h15, un walk-in prend place en fin de file, puis s'inscrit dans l'application (QA-27) ;
@@ -235,12 +294,12 @@ const evening = (name: string, at: number, prestationIds: string[], minEnd: numb
  * et repartent avant l'arrivée de Lucas (fermeture - 40 min). Les fins à 19h00 et 20h00 n'en ont pas.
  */
 const JOURNEE: Arrival[] = [
-  k('Louis', h(9, 15), ['degrade']),
+  { ...k('Louis', h(9, 15), ['degrade']), extra: 7 },
   k('Hugo', h(9, 22), ['classique']),
   k('Adam', h(9, 27), ['taper', 'barbe-express']),
   k('Jules', h(9, 33), ['crop']),
   k('Nathan', h(9, 38), ['undercut']),
-  k('Léo', h(11, 50), ['degrade']),
+  { ...k('Léo', h(11, 50), ['degrade']), extra: 10 },
   k('Théo', h(12, 20), ['classique', 'barbe-express'], 'absent'),
   k('Marius', h(13, 5), ['crop']),
   k('Enzo', h(13, 20), ['buzz', 'barbe-express']),

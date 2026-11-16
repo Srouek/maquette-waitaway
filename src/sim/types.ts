@@ -137,6 +137,8 @@ export type Arrival = {
   beforeEnd?: number;
   /** L'arrivée n'a lieu que si la fin de journée de la file est à cette heure ou plus tard. */
   minEnd?: number;
+  /** Simulation seulement : minutes que sa prestation durera en plus de sa durée estimée (voir `Ticket.extra`). */
+  extra?: number;
 };
 
 /**

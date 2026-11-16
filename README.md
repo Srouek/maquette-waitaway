@@ -45,19 +45,21 @@ Le compte « The Best Barber » (bestbarber@barber.fr) se connecte, scanne le QR
 
 | Heure | Ce qui se passe | Ce que ça montre |
 |---|---|---|
-| 9h15 | Louis s'inscrit, puis scanne le QR du poste | 1re prestation, temps restant |
+| 9h15 | Louis s'inscrit, puis scanne le QR du poste. Son dégradé dure 7 min de plus que prévu : à 9h50, 5 min de retard sont constatées | 1re prestation. Dépassement automatique : les clients pas encore au salon qui passent dans moins de 30 min sont prévenus, sans geste du coiffeur (S20) |
 | 9h40 | 4 clients sont inscrits | La file, avec la pause placée dedans |
-| 10h10 | Adam, en position 2, tombait sur 10h30 : la pause passe avant lui | Pause **plus tôt** que souhaité |
-| 10h20 | 5 min avant la fin de la pause, le coiffeur scanne son poste. Adam, confirmé, démarre à 10h22 : taper fade et barbe | Reprise par scan, en avance |
-| 12h35 | Léo, en position 1, tombait sur 12h30 : la pause glisse après lui | Pause **plus tard** que souhaité |
-| 13h30 | Théo, 1er à la reprise pour 40 min, n'est pas venu. Un passant entre | Le walk-in passe à sa place. Théo garde la 1re place (S37) ou est retiré (S23). Les heures de la file sont recalculées |
+| 10h17 | Adam, en position 2, tombait sur 10h30 : la pause passe avant lui | Pause **plus tôt** que souhaité |
+| 10h27 | 5 min avant la fin de la pause, le coiffeur scanne son poste. Adam, confirmé, démarre à 10h29 : taper fade et barbe | Reprise par scan, en avance |
+| 12h14 | Léo démarre un dégradé avec un motif. Le coiffeur touche sa carte et annonce 10 min de retard | Retard annoncé en 1 geste (S20). 2e dépassement du dégradé dans la journée |
+| 12h54 | Léo, en position 1, tombait sur 12h30 : la pause glisse après lui | Pause **plus tard** que souhaité |
+| 13h49 | Théo, 1er à la reprise pour 40 min, n'est pas venu. Un passant entre | Le walk-in passe à sa place. Théo garde la 1re place (S37) ou est retiré (S23). Les heures de la file sont recalculées |
 | 16h00 | Le poste est libre | Pause à l'heure. À 16h10, laisse filer la fin pour montrer le retard du coiffeur |
-| 16h10 | Un homme entre sans avoir scanné : le coiffeur l'ajoute en fin de file | Walk-in qui attend son tour. Son tour est dans plus de 10 min : il est « En route », pas confirmé (QA-27, règle 1) |
-| 16h20 | Il scanne le QR code de son ticket | Le walk-in devient Tom, avec ses prestations (QA-27). Il confirme lui-même sa présence 10 min avant son tour, comme les autres clients (règle 11) |
-| 17h30 | Kylian s'inscrit, il finira pile à 19h00 | La journée est pleine |
+| 16h13 | Un homme entre sans avoir scanné : le coiffeur l'ajoute en fin de file | Walk-in qui attend son tour. Son tour est dans plus de 10 min : il est « En route », pas confirmé (QA-27, règle 1) |
+| 16h23 | Il scanne le QR code de son ticket | Le walk-in devient Tom, avec ses prestations (QA-27). Il confirme lui-même sa présence 10 min avant son tour, comme les autres clients (règle 11) |
+| 17h30 | Kylian s'inscrit, il finira vers 19h00 | La journée est pleine |
 | 18h20 | Lucas demande 30 min, il finirait à 19h30 | Demande après la fermeture : le coiffeur accepte ou refuse |
 | 18h20 | Le téléphone client (Romain) demande 40 min, il finirait vers 20h10 | Refusé d'office : plus de 30 min après la fermeture. Avec une fin de journée plus tardive, voir sous le tableau |
 | 19h00 ou 19h30 | Le saut s'arrête 5 min avant la fin de la dernière prestation. Le coiffeur ferme tout de suite, ou attend la notification « Plus personne n'attend » | Fermeture depuis l'application, sans scan, refusée tant qu'un client attend |
+| Après la fermeture | « Ton dégradé / fade a dépassé 2 fois aujourd'hui. Passer de 30 à 35 min ? » | Suggestion jamais appliquée seule (S20). Sans réponse, elle revient à l'ouverture suivante |
 
 Un walk-in que le coiffeur ajoute sans qu'il rattache son ticket reste « En route » s'il passe dans plus de 10 min. Quand son tour approche, la pop-up de retard s'ouvre chez le coiffeur, qui touche « Il est au salon : confirmer » (QA-27, règle 12).
 
@@ -103,6 +105,7 @@ E-mail et code reçu par e-mail, profil, choix des prestations et de leur durée
 | Coiffeur | Alerte `customer.late` : attendre, walk-in, client présent, retirer | S37 |
 | Coiffeur | Walk-in par ticket anonyme, à durée libre, avec QR code | S44, QA-27 |
 | Coiffeur | Fermeture de file depuis l'application, refusée tant que des clients attendent | QA-28 |
+| Coiffeur | Dépassement : retard annoncé en 1 geste depuis la carte du client en cours, suggestion d'allonger une prestation qui a dépassé 2 fois (après la fermeture ou à l'ouverture) | S20 |
 | Client | Questionnaire de satisfaction à la fin de la prestation : note de 1 à 5, commentaire facultatif | QA-34, épic à cadrer |
 | Client | Dépassement : notification de 5 min de retard, une fois constatées, aux clients non confirmés dont le tour est dans moins de 30 min | S20 |
 | Client | Notification quand son tour avance d'au moins 5 min | Hors backlog |
