@@ -12,6 +12,18 @@ npm run build      # site statique dans dist/, à héberger n'importe où
 
 Sur le téléphone, « Ajouter à l'écran d'accueil » ouvre la démo en plein écran.
 
+## Déployer
+
+Le travail se fait sur la branche `dev`. `main` ne sert qu'au déploiement : à chaque push sur `main`, `.github/workflows/deploy.yml` lance `npm ci` et `npm run build`, puis publie `dist/` sur GitHub Pages. Pour publier, on merge `dev` dans `main`.
+
+Mise en place, 1 fois :
+
+1. Créer le dépôt public sur GitHub, puis `git remote add origin <url>`, `git push -u origin dev` et `git push -u origin main`.
+2. Dans le dépôt : Settings > Pages > Source = « GitHub Actions ».
+3. Relancer le workflow depuis l'onglet Actions si le 1er push est parti avant ce réglage.
+
+Le site est servi à `https://<compte>.github.io/<dépôt>/`. Il marche dans n'importe quel sous-dossier, car `vite.config.ts` construit avec des chemins relatifs (`base: './'`).
+
 ## Utiliser pendant une présentation
 
 - **Sur un téléphone** : la barre du haut bascule entre la vue **Client** et la vue **Coiffeur**. Un point doré signale une notification en attente dans l'autre vue.

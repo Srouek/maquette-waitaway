@@ -10,12 +10,12 @@ Ce n'est pas le futur front. Le code de simulation sera jeté, mais les écrans,
 
 ## Ce qui va dans ce repo
 
-Dépôt git local, branche `main`, sans remote pour l'instant.
+Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `main` ne sert qu'au déploiement : chaque push sur `main` publie le site sur GitHub Pages (`.github/workflows/deploy.yml`). On passe de `dev` à `main` par un merge, seulement avec l'accord explicite de Gabi, donné pour ce merge-là.
 
 **À versionner :**
 - le code (`src/`) et les fichiers statiques (`public/`, `index.html`) ;
 - la configuration : `package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig.json` ;
-- `CLAUDE.md`, `README.md`, `.claude/` et `handoffs/`.
+- `CLAUDE.md`, `README.md`, `.claude/`, `.github/` et `handoffs/`.
 
 **Hors de git :**
 - les fichiers générés : `node_modules/`, `dist/`, `*.tsbuildinfo` ;
@@ -29,6 +29,8 @@ Dépôt git local, branche `main`, sans remote pour l'instant.
 ├── .claude/
 │   ├── rules/                 # règles d'écriture et de git, reprises de QueueAPI
 │   └── skills/handoff/        # passation de contexte entre 2 sessions
+├── .github/workflows/
+│   └── deploy.yml             # build et publication sur GitHub Pages
 ├── handoffs/                  # fichiers de passation datés
 ├── public/
 │   ├── icon.svg               # icône de l'écran d'accueil
@@ -87,4 +89,5 @@ npm run preview   # sert dist/ en local
 - Sous 900 px de large, l'application affiche 1 seul téléphone. Au-dessus, les 2 côte à côte.
 - Un scénario est une suite d'étapes dans `src/sim/scenarios.ts`. Chaque étape finit quand sa condition `until` devient vraie. Une condition déjà vraie fait sauter l'étape : écris-la assez précise (un prénom, une heure).
 - Les heures du scénario « ma journée » tiennent aux durées du catalogue et aux pauses par défaut. Après un changement dans `catalog.ts` ou `data.ts`, rejoue le scénario en entier.
+- Le dépôt est public : n'y mettre aucun secret, ni d'image d'un tiers.
 - Les polices viennent de Google Fonts : hors connexion, le navigateur affiche une police système.
