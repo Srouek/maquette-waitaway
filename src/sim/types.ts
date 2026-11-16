@@ -34,7 +34,7 @@ export type Ticket = {
   startedAt?: number;
   doneAt?: number;
   abortAt?: number;
-  abortReason?: 'self' | 'rejected_by_agent';
+  abortReason?: 'self' | 'rejected_by_agent' | 'incident';
   rejectMotif?: string;
 };
 
@@ -51,7 +51,14 @@ export type Pause = {
   minutes: number;
   remindedAt?: number;
   startedAt?: number;
+  /** Fin de la pause : l'agent a scanné le QR code de son poste pour reprendre. */
   endedAt?: number;
+  /** L'heure de fin est passée et l'agent a été prévenu qu'il doit scanner pour reprendre. */
+  endNotifiedAt?: number;
+  /** Heure du scan de reprise de l'agent. Absente quand la pause a fini seule (personne ne joue le coiffeur). */
+  resumedAt?: number;
+  /** Minutes de retard annoncées par l'agent : elles repoussent la fin de la pause. */
+  delay?: number;
   skipped?: boolean;
   /** Ticket devant lequel la pause a été placée. Une fois posé, ce choix ne bouge plus. */
   beforeTicketId?: string;
@@ -70,6 +77,10 @@ export type QueueFile = {
   /** Fin de journée, en minutes depuis minuit. */
   endOfDay: number;
   closedAt?: number;
+  /** Heure de la notification « Plus personne n'attend » qui invite l'agent à fermer sa file. */
+  closeHintAt?: number;
+  /** La file a été fermée sur incident (QA-33), pas en fin de journée. */
+  incident?: boolean;
   tickets: Ticket[];
 };
 
@@ -110,6 +121,8 @@ export type Arrival = {
   at?: number;
   /** Ou : minutes avant la fin de journée de la file. */
   beforeEnd?: number;
+  /** L'arrivée n'a lieu que si la fin de journée de la file est à cette heure ou plus tard. */
+  minEnd?: number;
 };
 
 export type ScenarioId = 'pro-journee' | 'client' | 'pro-compte';

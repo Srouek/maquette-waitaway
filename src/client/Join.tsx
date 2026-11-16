@@ -133,7 +133,7 @@ export function Choose({ fileId, preselect, tried }: { fileId: string; preselect
   );
 }
 
-const EXAMPLE = { lastName: 'Haddad', firstName: 'Samir', email: 'samir.haddad@exemple.fr', password: 'coiffure2026', confirm: 'coiffure2026' };
+const EXAMPLE = { lastName: 'Girard', firstName: 'Romain', email: 'romain.girard@exemple.fr', password: 'coiffure2026', confirm: 'coiffure2026' };
 
 /** Création du compte au moment de s'inscrire dans la file : Google, ou formulaire par e-mail (E2-0). */
 export function Signup({ fileId, prestationIds }: { fileId: string; prestationIds: string[] }) {
@@ -168,7 +168,7 @@ export function Signup({ fileId, prestationIds }: { fileId: string; prestationId
         <p className="muted">Il garde ta place et te prévient quand ton tour approche.</p>
         <div className="actions">
           {/* Écart : la connexion Google ne renvoie pas encore de token utilisable (QA-13). */}
-          <button className="btn btn-outline btn-lg" onClick={() => finish(EXAMPLE.firstName, EXAMPLE.lastName, 'samir.haddad@gmail.com')}>
+          <button className="btn btn-outline btn-lg" onClick={() => finish(EXAMPLE.firstName, EXAMPLE.lastName, 'romain.girard@gmail.com')}>
             <span className="google" aria-hidden>
               G
             </span>

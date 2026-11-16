@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useReducer, type Dispatch, type ReactNode } from 'react';
+import { agentLate } from './engine';
 import { buildScenario, guideReducer, type GuideAction } from './scenarios';
 import type { SimState } from './types';
 
-// v2 : pauses, comptes et scénarios. Un état v1 n'a plus la bonne forme, il est ignoré.
-const KEY = 'waitaway-demo-v2';
+// v3 : prénoms des clients et identifiant de la file du coiffeur changés. Un état plus ancien est ignoré.
+const KEY = 'waitaway-demo-v3';
 
 function load(): SimState {
   try {
@@ -28,12 +29,14 @@ export function SimProvider({ children }: { children: ReactNode }) {
     }
   }, [s]);
 
-  // Lecture automatique : 1 minute simulée toutes les 2 secondes.
+  // Lecture automatique : 1 minute simulée toutes les 2 secondes. Toutes les 5 secondes quand le coiffeur est en
+  // retard sur la fin de sa pause, pour laisser le temps de montrer sa décision.
+  const slow = agentLate(s);
   useEffect(() => {
     if (!s.playing) return;
-    const id = setInterval(() => dispatch({ type: 'advance', minutes: 1 }), 2000);
+    const id = setInterval(() => dispatch({ type: 'advance', minutes: 1 }), slow ? 5000 : 2000);
     return () => clearInterval(id);
-  }, [s.playing]);
+  }, [s.playing, slow]);
 
   return <Ctx.Provider value={{ s, dispatch }}>{children}</Ctx.Provider>;
 }

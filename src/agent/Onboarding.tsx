@@ -32,11 +32,11 @@ function Profil() {
       <p className="muted">Les clients voient ton prénom et ton métier quand ils choisissent leur coiffeur.</p>
       <label className="field">
         <span>Prénom</span>
-        <input autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ex. Karim" />
+        <input autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ex. Antoine" />
       </label>
       <label className="field">
         <span>Nom</span>
-        <input autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Ex. Benali" />
+        <input autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Ex. Lefèvre" />
       </label>
       <div className="field">
         <span>Métier</span>
@@ -52,8 +52,8 @@ function Profil() {
         <button
           className="link"
           onClick={() => {
-            setFirstName('Karim');
-            setLastName('Benali');
+            setFirstName('Antoine');
+            setLastName('Lefèvre');
           }}
         >
           Remplir avec un exemple

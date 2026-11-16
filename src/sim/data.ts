@@ -6,7 +6,7 @@ export const STORE = {
 };
 
 /** La file tenue par l'agent de la vue « Coiffeur ». */
-export const AGENT_FILE_ID = 'karim';
+export const AGENT_FILE_ID = 'agent';
 
 export const JULIE_PRESTATIONS: Prestation[] = [
   { id: 'coupe-f', group: 'autre', label: 'Coupe femme', minutes: 35, description: 'Coupe et coiffage.' },

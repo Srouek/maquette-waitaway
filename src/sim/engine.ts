@@ -36,8 +36,29 @@ export const remaining = (f: QueueFile, now: number) => Math.max(0, remainingRaw
 
 export const runningPause = (f: QueueFile) => f.pauses.find((p) => p.startedAt !== undefined && p.endedAt === undefined);
 
-/** Fin prévue d'une pause démarrée. */
-export const pauseEnd = (p: Pause) => p.startedAt! + p.minutes;
+/** Fin prévue d'une pause démarrée, retard annoncé compris. */
+export const pauseEnd = (p: Pause) => p.startedAt! + p.minutes + (p.delay ?? 0);
+
+/**
+ * Pause dont l'heure de fin est passée sans que l'agent ait scanné le QR code de son poste pour reprendre.
+ * Tant qu'il ne l'a pas fait, aucun client ne peut démarrer : c'est ce scan qui dit que le coiffeur est revenu.
+ * Le temps continue de tourner : l'agent est en retard, et il le reste jusqu'à ce qu'il reprenne, annonce
+ * un retard ou ferme sa file. Ce n'est pas encore dans le backlog : voir QA-31 à QA-33.
+ */
+export const pauseOverdue = (f: QueueFile, now: number) => {
+  const run = runningPause(f);
+  return run && now >= pauseEnd(run) ? run : undefined;
+};
+
+/**
+ * Fin de journée passée, plus personne en service ni en attente : l'agent n'a plus qu'à fermer sa file.
+ * Écart avec QA-28, qui ne prévoit pas de notification : la maquette invite l'agent à fermer, et le temps s'arrête.
+ */
+export const closeDue = (f: QueueFile, now: number) =>
+  f.open && now >= f.endOfDay && !inService(f) && waiting(f).length === 0 && pendingOvertime(f).length === 0;
+
+/** Titre de la notification de fin de pause, retirée quand l'agent reprend. */
+const PAUSE_OVER = 'Ta pause est finie';
 
 const pendingPauses = (f: QueueFile) =>
   f.pauses.filter((p) => p.startedAt === undefined && !p.skipped).sort((a, b) => a.plannedAt - b.plannedAt);
@@ -199,6 +220,7 @@ export function canStart(f: QueueFile, ticketId: string, now: number): string | 
   if (position(f, ticketId) !== 1) return 'Ce n’est pas encore ton tour : tu n’es pas en position 1.';
   const run = runningPause(f);
   if (run && now < pauseEnd(run)) return `${f.agentName} est en pause jusqu’à ${fmt(pauseEnd(run))}.`;
+  if (run) return `${f.agentName} n’a pas encore repris sa file. Ton tour vient dès son retour.`;
   if (pauseDue(f, now)) return `${f.agentName} prend sa pause. Ton tour vient juste après.`;
   const rem = remaining(f, now);
   if (rem >= 15) return `${f.agentName} termine encore avec un client. Réessaie dans ${rem - 14} min.`;
@@ -242,10 +264,13 @@ export type Action =
   | { type: 'startPause'; id: PauseId }
   | { type: 'skipPause'; id: PauseId }
   | { type: 'resume' }
+  | { type: 'declareDelay'; minutes: number }
+  | { type: 'incidentClose' }
   | { type: 'decideOvertime'; ticketId: string; accept: boolean }
   | { type: 'reject'; ticketId: string; motif: string }
   | { type: 'agentStart'; ticketId: string }
   | { type: 'dismissLate' }
+  | { type: 'agentConfirm'; ticketId: string }
   | { type: 'walkIn'; minutes: number; startNow?: boolean; rejectLate?: boolean }
   | { type: 'closeFile'; current?: 'terminer' | 'rejeter' }
   | { type: 'dropNotif'; id: number };
@@ -320,15 +345,26 @@ function askOvertime(s: SimState, t: Ticket, end: number) {
   notify(s, 'agent', `${t.name} demande une place après ta fermeture`, `Il finirait vers ${fmt(end)}. Accepte ou refuse.`);
 }
 
+/** Minutes entre le scan de reprise de l'agent et le scan du poste par le client confirmé en position 1. */
+const RESUME_DELAY = 2;
+
+/** Vrai quand c'est la personne qui fait la démo qui tient le téléphone de ce coiffeur. */
+const playedByUser = (s: SimState, f: QueueFile) => !s.autoAgent && f.id === AGENT_FILE_ID;
+
 /** Ce que font les clients simulés à l'heure courante. */
 function act(s: SimState, f: QueueFile) {
   // Écart : ici, une prestation se termine seule quand sa durée est écoulée. Dans QueueAPI, c'est le
   // démarrage du suivant, la pause ou la fermeture qui la clôt. Le dépassement (E6-4) n'est pas montré.
   const cur = inService(f);
   if (cur && s.now >= cur.startedAt! + cur.duration) finish(s, cur);
+  // Personne ne tient le téléphone de ce coiffeur : sa pause finit seule, à l'heure.
+  const over = pauseOverdue(f, s.now);
+  if (over && !playedByUser(s, f)) over.endedAt = s.now;
   if (inService(f) || pauseDue(f, s.now)) return;
-  const run = runningPause(f);
-  if (run && s.now < pauseEnd(run)) return;
+  // Pause en cours, ou finie mais pas encore reprise par le scan de l'agent : le poste reste fermé.
+  if (runningPause(f)) return;
+  // Le client confirmé voit le coiffeur revenir : il scanne le poste 2 min après le scan de reprise.
+  if (f.pauses.some((p) => p.resumedAt !== undefined && s.now - p.resumedAt < RESUME_DELAY)) return;
   // Le client simulé en position 1 scanne le QR du poste dès que le poste est libre.
   const u1 = waiting(f)[0];
   if (u1 && !isMine(s, u1) && !u1.anonymous && u1.confirmedAt !== undefined) startTicket(s, f, u1);
@@ -341,6 +377,7 @@ function arrive(s: SimState, f: QueueFile) {
   if (due.length === 0) return;
   s.script = s.script.filter((a) => !due.includes(a));
   for (const a of due) {
+    if (a.minEnd !== undefined && f.endOfDay < a.minEnd) continue; // client prévu pour une journée plus longue
     const dur = durationOf(f, a.prestationIds);
     const start = projectedStart(f, s.now, dur);
     const over = start + dur > f.endOfDay;
@@ -360,6 +397,10 @@ function observe(s: SimState, f: QueueFile) {
     // pause.reminder. Écart : S24 l'envoie à l'heure souhaitée. Ici, il part quand le créneau calculé arrive.
     notify(s, 'agent', `${PAUSE_LABEL[due.id]} : c’est le moment`, 'Scanne le QR code de ton poste pour la démarrer.');
   }
+  if (playedByUser(s, f) && closeDue(f, s.now) && f.closeHintAt === undefined) {
+    f.closeHintAt = s.now;
+    notify(s, 'agent', 'Plus personne n’attend', 'Ta journée est finie. Scanne le QR code de ton poste pour fermer ta file.');
+  }
   // QA-27, règles 3 et 4 : le walk-in scanne le QR code de son ticket pendant son attente.
   // Le ticket prend son nom et ses prestations, et sa durée devient celle des prestations.
   if (s.claim && f.id === AGENT_FILE_ID) {
@@ -371,6 +412,10 @@ function observe(s: SimState, f: QueueFile) {
       t.duration = durationOf(f, c.prestationIds);
       t.anonymous = false;
       t.claimedAt = s.now;
+      // QA-27 règle 11 et S44, décision de Gabi le 16/11/2026 : avec l'application, le client peut sortir du salon
+      // sans prévenir. Sa confirmation est retirée et il repasse par le parcours normal : rappel, rescan de l'entrée,
+      // signalement de retard. Comme en S38, il reste confirmé si son tour est à moins de 10 min.
+      if (waitFor(f, t.id, s.now) >= 10) t.confirmedAt = undefined;
       s.claim = undefined;
       notify(s, 'agent', `Ton walk-in s’est inscrit : ${t.name}`, `${ticketLabel(f, t)}, ${t.duration} min.`);
     }
@@ -380,10 +425,18 @@ function observe(s: SimState, f: QueueFile) {
   // Scénario client : personne ne joue le coiffeur, sa pause démarre seule.
   if (due && s.autoAgent && f.id === AGENT_FILE_ID) beginPause(s, f, due);
 
+  // queue.resumed attendu : la pause est finie, l'agent doit scanner le QR code de son poste.
+  const over = pauseOverdue(f, s.now);
+  if (over && playedByUser(s, f) && over.endNotifiedAt === undefined) {
+    over.endNotifiedAt = s.now;
+    notify(s, 'agent', PAUSE_OVER, 'Scanne le QR code de ton poste pour reprendre, ou préviens tes clients de ton retard.');
+  }
+
   waiting(f).forEach((t, i) => {
     const wait = waitFor(f, t.id, s.now);
 
-    if (t.behavior === 'ponctuel' && t.confirmedAt === undefined && wait <= 10) t.confirmedAt = s.now;
+    // Un ticket anonyme non rattaché n'a pas d'application pour rescanner : seul l'agent le confirme.
+    if (!t.anonymous && t.behavior === 'ponctuel' && t.confirmedAt === undefined && wait <= 10) t.confirmedAt = s.now;
     if (t.behavior === 'retard' && t.confirmedAt === undefined && t.lateNotifiedAt !== undefined && s.now - t.lateNotifiedAt >= 8)
       t.confirmedAt = s.now;
 
@@ -411,8 +464,7 @@ function observe(s: SimState, f: QueueFile) {
 
   // Appel : called.for.service
   const next = waiting(f)[0];
-  const run = runningPause(f);
-  const free = remainingRaw(f, s.now) <= 0 && !pauseDue(f, s.now) && !(run && s.now < pauseEnd(run));
+  const free = remainingRaw(f, s.now) <= 0 && !pauseDue(f, s.now) && !runningPause(f);
   if (next && isMine(s, next) && next.calledAt === undefined && free) {
     next.calledAt = s.now;
     notify(s, 'client', 'C’est ton tour', `${f.agentName} est prêt. Touche Scan devant son poste.`);
@@ -431,10 +483,24 @@ function step(s: SimState) {
   }
 }
 
-/** Vrai quand l'agent doit décider : une pause à démarrer, ou un client en retard. */
+/**
+ * Vrai quand l'agent doit décider : une pause à démarrer, un client en retard, une demande après la fermeture,
+ * ou sa file à fermer en fin de journée.
+ * Une pause finie mais pas reprise n'arrête pas le temps : elle le ralentit (voir `agentLate`).
+ */
 const needsAgent = (s: SimState) => {
   const f = fileById(s, AGENT_FILE_ID);
-  return !s.autoAgent && f.open && (s.lateAlert !== undefined || pauseDue(f, s.now) !== undefined || pendingOvertime(f).length > 0);
+  return (
+    !s.autoAgent &&
+    f.open &&
+    (s.lateAlert !== undefined || pauseDue(f, s.now) !== undefined || pendingOvertime(f).length > 0 || closeDue(f, s.now))
+  );
+};
+
+/** Vrai quand le coiffeur joué par la démo est en retard sur la fin de sa pause : le temps passe au ralenti. */
+export const agentLate = (s: SimState) => {
+  const f = fileById(s, AGENT_FILE_ID);
+  return !s.autoAgent && f.open && pauseOverdue(f, s.now) !== undefined;
 };
 
 /** Le temps s'arrête quand l'agent doit décider, et repart quand il l'a fait. */
@@ -551,6 +617,7 @@ export function reducer(state: SimState, a: Action): SimState {
       f.pauses = a.pauses.filter((p) => p.on).map((p) => ({ id: p.id, plannedAt: p.at, minutes: p.minutes }));
       f.endOfDay = a.endOfDay;
       f.open = true;
+      f.incident = undefined;
       f.closedAt = undefined;
       // Ouvrir sa file lance le temps.
       s.playing = true;
@@ -569,17 +636,54 @@ export function reducer(state: SimState, a: Action): SimState {
       break;
     }
     case 'resume': {
-      // queue.resumed. Dans la démo, « Reprendre » veut dire « la pause est finie » : le temps saute à sa fin
-      // prévue, sinon l'heure simulée prendrait du retard sur le programme de la file.
+      // queue.resumed, après le scan du QR code du poste. Repris avant l'heure prévue, la pause finit tout de suite.
+      // C'est toujours le client qui démarre sa prestation (S5) : le client confirmé en position 1 voit le coiffeur
+      // revenir et scanne le poste `RESUME_DELAY` min plus tard, en gagnant le temps de pause restant (QA-31).
       const f = agentFile();
       const run = runningPause(f);
       if (!run) break;
-      const end = pauseEnd(run);
-      for (let i = 0; i < 180 && s.now < end; i++) step(s);
-      const still = runningPause(f);
-      if (still) still.endedAt = s.now;
-      // Le client confirmé en position 1 démarre dans la même minute.
-      act(s, f);
+      run.endedAt = s.now;
+      run.resumedAt = s.now;
+      s.notifs = s.notifs.filter((n) => !(n.to === 'agent' && n.title === PAUSE_OVER));
+      break;
+    }
+    case 'declareDelay': {
+      // QA-32 : l'agent annonce un retard. La reprise est décalée de `minutes` à partir de maintenant, ou de la fin
+      // prévue si elle n'est pas encore passée. À la nouvelle heure, il doit encore scanner pour reprendre.
+      const f = agentFile();
+      const run = runningPause(f);
+      if (!run) break;
+      const back = Math.max(s.now, pauseEnd(run)) + a.minutes;
+      run.delay = back - run.startedAt! - run.minutes;
+      run.endNotifiedAt = undefined;
+      s.notifs = s.notifs.filter((n) => !(n.to === 'agent' && n.title === PAUSE_OVER));
+      const mine = waiting(f).find((t) => isMine(s, t));
+      if (mine)
+        notify(s, 'client', `${f.agentName} reprend avec du retard`, `Reprise prévue vers ${fmt(back)}. Ton tour est estimé vers ${fmt(s.now + waitFor(f, mine.id, s.now))}.`);
+      break;
+    }
+    case 'incidentClose': {
+      // QA-33 (E6-9, S25) : fermeture sur incident. Contrairement à la fermeture normale (QA-28), elle sort tous les
+      // clients de la file, qui sont prévenus (queue.closed.incident).
+      const f = agentFile();
+      const cur = inService(f);
+      if (cur) finish(s, cur);
+      const run = runningPause(f);
+      if (run) run.endedAt = s.now;
+      for (const t of f.tickets.filter((x) => x.startedAt === undefined && x.abortAt === undefined)) {
+        t.abortAt = s.now;
+        t.abortReason = 'incident';
+        t.rejectMotif = `Un imprévu oblige ${f.agentName} à fermer sa file pour aujourd’hui.`;
+        if (isMine(s, t)) notify(s, 'client', `${f.agentName} a dû fermer sa file`, t.rejectMotif);
+      }
+      f.open = false;
+      f.closedAt = s.now;
+      f.incident = true;
+      s.playing = false;
+      s.lateAlert = undefined;
+      s.notifs = s.notifs.filter((n) => n.to !== 'agent');
+      f.tickets = f.tickets.filter((t) => isMine(s, t));
+      f.pauses = [];
       break;
     }
     case 'decideOvertime': {
@@ -600,6 +704,14 @@ export function reducer(state: SimState, a: Action): SimState {
       if (t) startTicket(s, f, t);
       break;
     }
+    case 'agentConfirm': {
+      // QA-27 règle 12 : l'agent voit le walk-in au salon et confirme son ticket anonyme à sa place.
+      const t = agentFile().tickets.find((x) => x.id === a.ticketId);
+      if (!t || t.confirmedAt !== undefined) break;
+      t.confirmedAt = s.now;
+      if (s.lateAlert?.ticketId === t.id) s.lateAlert = undefined;
+      break;
+    }
     case 'dismissLate': {
       const t = agentFile().tickets.find((x) => x.id === s.lateAlert?.ticketId);
       if (t) t.lateDecidedAt = s.now;
@@ -607,11 +719,14 @@ export function reducer(state: SimState, a: Action): SimState {
       break;
     }
     case 'walkIn': {
-      // S44 : l'agent ne choisit qu'une durée. Le ticket anonyme part en fin de file, déjà confirmé.
+      // S44 : l'agent ne choisit qu'une durée. Le ticket anonyme part en fin de file. QA-27 règle 1 (16/11/2026) :
+      // confirmé d'office si son tour est dans moins de 10 min, comme en S38. Sinon il est en route, et l'agent
+      // confirme sa présence quand son tour approche (règle 12) : le walk-in a pu sortir du salon entre-temps.
       const f = agentFile();
       const n = f.tickets.filter((t) => t.anonymous).length + 1;
-      const t = mkTicket(f, `Walk-in ${n}`, [], s.now, 'ponctuel', { anonymous: true, walkIn: true, confirmedAt: s.now, duration: a.minutes });
+      const t = mkTicket(f, `Walk-in ${n}`, [], s.now, 'ponctuel', { anonymous: true, walkIn: true, duration: a.minutes });
       f.tickets.push(t);
+      if (a.startNow || waitFor(f, t.id, s.now) < 10) t.confirmedAt = s.now;
       s.playing = f.open;
       if (a.startNow) {
         // « Prendre un client présent » (S37) : le client en retard garde la position 1,

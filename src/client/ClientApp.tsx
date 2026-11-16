@@ -14,7 +14,7 @@ export function ClientApp() {
   const nav = s.clientNav;
 
   let screen;
-  if (mine && mine.ticket.abortReason === 'rejected_by_agent') screen = <Rejected file={mine.file} ticket={mine.ticket} />;
+  if (mine && (mine.ticket.abortReason === 'rejected_by_agent' || mine.ticket.abortReason === 'incident')) screen = <Rejected file={mine.file} ticket={mine.ticket} />;
   else if (mine && mine.ticket.doneAt !== undefined) screen = <Done file={mine.file} ticket={mine.ticket} />;
   else if (mine && mine.ticket.startedAt !== undefined) screen = <InService file={mine.file} ticket={mine.ticket} />;
   else if (mine && mine.ticket.overtime === 'pending') screen = <Pending file={mine.file} ticket={mine.ticket} />;
@@ -126,7 +126,13 @@ function Rejected({ file, ticket }: { file: QueueFile; ticket: Ticket }) {
   return (
     <main className="screen end">
       <Brand />
-      <h1 className="title">{ticket.overtime === 'refused' ? `${file.agentName} ne peut pas te prendre aujourd’hui` : `${file.agentName} a retiré ton ticket`}</h1>
+      <h1 className="title">
+        {ticket.abortReason === 'incident'
+          ? `${file.agentName} a dû fermer sa file`
+          : ticket.overtime === 'refused'
+            ? `${file.agentName} ne peut pas te prendre aujourd’hui`
+            : `${file.agentName} a retiré ton ticket`}
+      </h1>
       <p className="lead">Motif : {ticket.rejectMotif}</p>
       <p className="muted">Tu peux reprendre une place si le salon est encore ouvert.</p>
       <div className="actions">

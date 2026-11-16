@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AgentApp } from './agent/AgentApp';
 import { ClientApp } from './client/ClientApp';
-import { fmt } from './sim/engine';
+import { AGENT_FILE_ID } from './sim/data';
+import { fileById, fmt } from './sim/engine';
 import { SCENARIOS, SCENARIO_LIST, currentStep, stepsOf } from './sim/scenarios';
 import { useSim } from './sim/store';
 import { Sheet } from './ui/kit';
@@ -84,7 +85,11 @@ export function App() {
           </>
         ) : (
           <>
-            <span className="guide-text">« {SCENARIOS[scenarioId].label} » est terminé.</span>
+            <span className="guide-text">
+              {fileById(s, AGENT_FILE_ID).incident
+                ? `Ta file est fermée sur imprévu : « ${SCENARIOS[scenarioId].label} » s’arrête là. Relance-le pour essayer une autre décision.`
+                : `« ${SCENARIOS[scenarioId].label} » est terminé.`}
+            </span>
             <button className="guide-jump" onClick={() => setMenu(true)}>
               Autre scénario
             </button>

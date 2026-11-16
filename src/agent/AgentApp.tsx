@@ -66,7 +66,7 @@ export function AgentApp() {
   );
 }
 
-const DEMO_EMAIL = 'karim@salonleclos.fr';
+const DEMO_EMAIL = 'antoine@salonleclos.fr';
 const DEMO_CODE = '482159';
 
 /**
