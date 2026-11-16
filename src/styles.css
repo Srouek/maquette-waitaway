@@ -157,6 +157,8 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   background: var(--oxblood); color: var(--surface); font: 700 19px var(--font-display);
 }
 .file-who, .queue-who { display: grid; flex: 1; min-width: 0; }
+/* Démo : le cas que montre ce coiffeur dans le scénario client. */
+.demo-tag { justify-self: start; margin-top: 4px; padding: 2px 8px; border-radius: var(--r-sm); background: var(--brass-soft); color: var(--brass-ink); font-size: .75rem; font-weight: 700; }
 .file-wait { display: grid; text-align: right; }
 .file-wait strong { font: 700 20px var(--font-display); }
 
@@ -202,6 +204,24 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   font: 18px var(--font-body); background: var(--surface);
 }
 .field input:focus { border-color: var(--ink); outline: none; }
+.field textarea {
+  width: 100%; min-width: 0; padding: 10px 14px; border-radius: var(--r-sm); border: 2px solid var(--chrome);
+  font: 16px var(--font-body); background: var(--surface); resize: vertical; font-weight: 400;
+}
+.field textarea:focus { border-color: var(--ink); outline: none; }
+/* Questionnaire de satisfaction */
+.survey { display: grid; gap: 12px; text-align: left; }
+.stars { display: flex; gap: 4px; }
+.stars button { width: var(--tap); height: var(--tap); display: grid; place-items: center; border: 0; background: none; color: var(--chrome); cursor: pointer; }
+.stars button.on { color: var(--brass); }
+.stars svg { width: 32px; height: 32px; }
+.survey-about { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.survey-about dt { color: var(--muted); }
+.survey-about dd { margin: 0; font-weight: 600; }
+.survey-add { position: relative; cursor: pointer; }
+.survey-photo { display: grid; gap: 8px; justify-items: start; margin: 0; }
+.survey-photo img { width: 100%; max-height: 240px; object-fit: cover; border-radius: var(--r-md); border: 1px solid var(--chrome); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- Ticket : l'élément fort ---------- */
 .ticket { border-radius: var(--r-lg); overflow: hidden; background: var(--surface); box-shadow: 0 12px 28px rgba(21,34,56,.14); }

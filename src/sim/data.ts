@@ -1,3 +1,4 @@
+import { CATALOG } from './catalog';
 import type { Behavior, DayPlan, PauseId, PausePlan, Prestation, QueueFile, Ticket } from './types';
 
 export const STORE = {
@@ -6,13 +7,15 @@ export const STORE = {
 };
 
 /** La file tenue par l'agent de la vue « Coiffeur ». */
-export const AGENT_FILE_ID = 'karim';
+export const AGENT_FILE_ID = 'agent';
 
-export const JULIE_PRESTATIONS: Prestation[] = [
-  { id: 'coupe-f', group: 'autre', label: 'Coupe femme', minutes: 35, description: 'Coupe et coiffage.' },
-  { id: 'brushing', group: 'autre', label: 'Brushing', minutes: 25, description: 'Séchage et mise en forme.' },
-  { id: 'enfant', group: 'autre', label: 'Coupe enfant', minutes: 15, description: 'Jusqu’à 12 ans.' },
-];
+/** Le 2e barbier du salon, que personne ne joue. */
+export const MATHIS_FILE_ID = 'mathis';
+
+/** 6 des 9 prestations de la journée du coiffeur. */
+export const MATHIS_PRESTATIONS: Prestation[] = CATALOG.filter((p) =>
+  ['degrade', 'taper', 'crop', 'classique', 'buzz', 'barbe-express'].includes(p.id),
+).map((p) => ({ ...p }));
 
 export const h = (hh: number, mm = 0) => hh * 60 + mm;
 

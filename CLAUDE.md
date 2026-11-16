@@ -43,6 +43,7 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 │   │   ├── data.ts            # Store, semaine type, pauses par défaut
 │   │   ├── engine.ts          # règles métier, sélecteurs, reducer
 │   │   ├── scenarios.ts       # les 3 scénarios : état de départ, arrivées, étapes du guide
+│   │   ├── salon.ts           # scénario client : 8 coiffeurs, 1 cas chacun, et leurs gestes prévus
 │   │   └── store.tsx          # contexte React, lecture auto, sauvegarde locale
 │   ├── client/
 │   │   ├── ClientApp.tsx      # aiguillage, accueil, prestation en cours, fin
@@ -57,7 +58,7 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 │   ├── ui/
 │   │   ├── icons.tsx          # icônes de prestation et d'interface, en SVG
 │   │   └── kit.tsx            # scan simulé, roulette, notifications, panneaux, faux QR code
-│   ├── App.tsx                # barre de démo, bandeau guide, 1 ou 2 téléphones selon la largeur
+│   ├── App.tsx                # barre de démo, bandeau guide, le téléphone du scénario
 │   ├── main.tsx
 │   └── styles.css             # tokens dans :root, puis composants
 ├── index.html
@@ -86,7 +87,7 @@ npm run preview   # sert dist/ en local
 ## Pièges
 
 - L'état est sauvegardé dans le `localStorage` du navigateur. Après un changement dans `src/sim/`, relancer un scénario par le menu ⋯, sinon l'ancien état reste affiché. Si la forme de l'état change, changer la clé `KEY` de `store.tsx`.
-- Sous 900 px de large, l'application affiche 1 seul téléphone. Au-dessus, les 2 côte à côte.
+- Chaque scénario montre 1 seul téléphone : celui du coiffeur dans les scénarios coiffeur (il pilote sa file avec son seul téléphone, décision de Gabi), celui du client dans le scénario client. Un geste d'un client dans un scénario coiffeur se simule par une arrivée du script, jamais par le téléphone client. À 900 px et plus, le téléphone s'affiche dans un cadre.
 - Un scénario est une suite d'étapes dans `src/sim/scenarios.ts`. Chaque étape finit quand sa condition `until` devient vraie. Une condition déjà vraie fait sauter l'étape : écris-la assez précise (un prénom, une heure).
 - Les heures du scénario « ma journée » tiennent aux durées du catalogue et aux pauses par défaut. Après un changement dans `catalog.ts` ou `data.ts`, rejoue le scénario en entier.
 - Le dépôt est public : n'y mettre aucun secret, ni d'image d'un tiers.

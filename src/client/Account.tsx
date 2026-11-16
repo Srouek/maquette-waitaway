@@ -1,22 +1,40 @@
 import { useState } from 'react';
 import { STORE } from '../sim/data';
-import { canStart, fmt, inService, myTicket, nextScan, pauseMinutesBefore, position, prestationsOf, remaining, waitFor } from '../sim/engine';
+import {
+  CONFIRM_WINDOW,
+  REMINDER_OPTIONS,
+  START_GUARD,
+  canConfirm,
+  canStart,
+  fmt,
+  inService,
+  myTicket,
+  nextScan,
+  pauseMinutesBefore,
+  position,
+  prestationsOf,
+  remaining,
+  waitFor,
+} from '../sim/engine';
 import { useSim } from '../sim/store';
 import type { QueueFile, Ticket } from '../sim/types';
 import { PrestationIcon, ScanIcon, StarIcon } from '../ui/icons';
-import { Sheet } from '../ui/kit';
+import { Sheet, Stepper } from '../ui/kit';
 import { PrestationList, TicketCard, findPrestation, type ScanFn } from './parts';
 
-function ReminderChoice() {
-  const { s, dispatch } = useSim();
+/** Rappel personnel : de 20 à 60 min avant le tour, par pas de 5. Seuls les délais encore à venir sont proposés. */
+function ReminderChoice({ wait, value }: { wait: number; value?: number }) {
+  const { dispatch } = useSim();
+  const list: (number | null)[] = [null, ...REMINDER_OPTIONS.filter((m) => m < wait)];
+  const i = Math.max(0, list.indexOf(value ?? null));
+  const go = (j: number) => () => dispatch({ type: 'setReminder', minutes: list[j] });
   return (
-    <div className="seg" role="group" aria-label="Délai du rappel">
-      {[10, 20, 30].map((m) => (
-        <button key={m} className={m === s.me.reminderMinutes ? 'on' : ''} aria-pressed={m === s.me.reminderMinutes} onClick={() => dispatch({ type: 'setReminder', minutes: m })}>
-          {m} min
-        </button>
-      ))}
-    </div>
+    <Stepper
+      label="le délai du rappel"
+      value={value === undefined ? 'Pas de rappel' : `${value} min avant`}
+      onMinus={i > 0 ? go(i - 1) : undefined}
+      onPlus={i < list.length - 1 ? go(i + 1) : undefined}
+    />
   );
 }
 
@@ -38,10 +56,17 @@ export function Joined({ file, ticket }: { file: QueueFile; ticket: Ticket }) {
       ) : (
         <section className="panel">
           <p>
-            <strong>Préviens-moi avant mon tour</strong>
+            <strong>Rappel pour partir au salon</strong>
           </p>
-          <ReminderChoice />
-          <p className="muted small">Tu recevras une notification {s.me.reminderMinutes} min avant. D&rsquo;ici là, tu es libre.</p>
+          {REMINDER_OPTIONS[0] < waitFor(file, ticket.id, s.now) ? (
+            <ReminderChoice wait={waitFor(file, ticket.id, s.now)} value={ticket.reminder} />
+          ) : (
+            <p className="muted small">Ton tour est trop proche pour un rappel : reste dans le coin.</p>
+          )}
+          <p className="muted small">
+            {ticket.reminder !== undefined && `Une notification te dira de te mettre en route ${ticket.reminder} min avant ton tour. `}
+            {CONFIRM_WINDOW} min avant ton tour, tu seras invité à confirmer ta présence au salon. D&rsquo;ici là, tu es libre.
+          </p>
         </section>
       )}
       <footer className="footer">
@@ -76,7 +101,7 @@ export function Confirmed({ file, ticket }: { file: QueueFile; ticket: Ticket })
 export function Account({ scan }: { scan: ScanFn }) {
   const { s, dispatch } = useSim();
   const [leaving, setLeaving] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const mine = myTicket(s);
   const favorites = s.me.favorites.flatMap((id) => findPrestation(s, id) ?? []);
   const missing = mine ? mine.ticket.prestationIds.filter((id) => !s.me.favorites.includes(id)) : [];
@@ -84,11 +109,16 @@ export function Account({ scan }: { scan: ScanFn }) {
   const onScan = () => {
     const target = nextScan(s);
     if (target === 'store') return scan('QR code du salon', () => dispatch({ type: 'nav', nav: { screen: 'store' } }));
-    if (target === 'confirm') return scan('QR code du salon', () => dispatch({ type: 'confirm' }));
     const { file, ticket } = mine!;
+    if (target === 'confirm')
+      return scan('QR code du salon', () => {
+        const err = canConfirm(file, ticket.id, s.now);
+        setScanError(err);
+        if (!err) dispatch({ type: 'confirm' });
+      });
     scan('QR du poste de ' + file.agentName, () => {
       const err = canStart(file, ticket.id, s.now);
-      setStartError(err);
+      setScanError(err);
       if (!err) dispatch({ type: 'clientStart' });
     });
   };
@@ -108,7 +138,7 @@ export function Account({ scan }: { scan: ScanFn }) {
 
       <h2 className="section">Attente en cours</h2>
       {mine ? (
-        <Waiting file={mine.file} ticket={mine.ticket} startError={startError} onScan={onScan} onLeave={() => setLeaving(true)} />
+        <Waiting file={mine.file} ticket={mine.ticket} scanError={scanError} onScan={onScan} onLeave={() => setLeaving(true)} />
       ) : (
         <section className="panel">
           <p className="muted">Aucune attente en cours. Scanne le QR code d&rsquo;un salon pour prendre ta place.</p>
@@ -166,13 +196,13 @@ export function Account({ scan }: { scan: ScanFn }) {
 function Waiting({
   file,
   ticket,
-  startError,
+  scanError,
   onScan,
   onLeave,
 }: {
   file: QueueFile;
   ticket: Ticket;
-  startError: string | null;
+  scanError: string | null;
   onScan: () => void;
   onLeave: () => void;
 }) {
@@ -182,7 +212,7 @@ function Waiting({
   const ahead = pos - 1 + (inService(file) ? 1 : 0);
   const confirmed = ticket.confirmedAt !== undefined;
   const pauseMin = pauseMinutesBefore(file, ticket.id, s.now);
-  const soon = pos === 1 && remaining(file, s.now) < 15 && confirmed;
+  const soon = pos === 1 && remaining(file, s.now) <= START_GUARD && confirmed;
 
   return (
     <>
@@ -191,22 +221,30 @@ function Waiting({
           <p>
             <strong>C&rsquo;est bientôt à toi.</strong> Quand {file.agentName} est prêt, touche Scan devant son poste pour commencer.
           </p>
-          {startError && <p className="error">{startError}</p>}
+          {scanError && <p className="error">{scanError}</p>}
           {/* Le même scan que le bouton du haut, placé là où le client lit la consigne. */}
           <button className="btn btn-primary btn-lg" onClick={onScan}>
             Scanner le QR du poste
           </button>
         </section>
-      ) : !confirmed && ticket.remindedAt !== undefined ? (
+      ) : !confirmed && ticket.invitedAt !== undefined ? (
         <section className="panel panel-remind">
           <p>
-            <strong>Ton tour approche.</strong> Reviens au salon et touche Scan pour confirmer que tu es là.
+            <strong>Confirme ta présence.</strong> Au salon, touche Scan pour dire à {file.agentName} que tu es là.
           </p>
           <button className="btn btn-brass btn-lg" onClick={onScan}>
             Je suis au salon
           </button>
         </section>
+      ) : !confirmed && ticket.remindedAt !== undefined ? (
+        <section className="panel panel-remind">
+          <p>
+            <strong>Mets-toi en route.</strong> Tu pourras confirmer ta présence à partir de {fmt(s.now + wait - CONFIRM_WINDOW)}.
+          </p>
+        </section>
       ) : null}
+      {/* Un scan refusé hors du panneau « C'est bientôt à toi » s'affiche ici. */}
+      {scanError && !soon && <p className="error">{scanError}</p>}
 
       <section className="wait-card">
         <div className="wait-head">
@@ -241,7 +279,12 @@ function Waiting({
             L&rsquo;attente compte {pauseMin} min de pause de {file.agentName}.
           </p>
         )}
-        {!confirmed && ticket.remindedAt === undefined && <p className="muted small">Rappel {s.me.reminderMinutes} min avant ton tour.</p>}
+        {!confirmed && ticket.invitedAt === undefined && (
+          <p className="muted small">
+            {ticket.reminder !== undefined && ticket.remindedAt === undefined && `Rappel ${ticket.reminder} min avant ton tour. `}
+            Confirmation de présence à partir de {fmt(s.now + wait - CONFIRM_WINDOW)}.
+          </p>
+        )}
       </section>
 
       <button className="link-danger link-inline" onClick={onLeave}>
