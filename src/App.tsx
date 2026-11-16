@@ -7,8 +7,6 @@ import { SCENARIOS, SCENARIO_LIST, currentStep, stepsOf } from './sim/scenarios'
 import { useSim } from './sim/store';
 import { Sheet } from './ui/kit';
 
-type View = 'client' | 'agent';
-
 function useWide() {
   const q = '(min-width: 900px)';
   const [wide, setWide] = useState(() => window.matchMedia(q).matches);
@@ -25,36 +23,16 @@ export function App() {
   const { s, dispatch } = useSim();
   const wide = useWide();
   const step = currentStep(s);
-  const [view, setView] = useState<View>(step?.view ?? 'agent');
   const [menu, setMenu] = useState(false);
-
-  // Sur petit écran, la démo bascule seule sur le téléphone concerné par l'étape.
-  const stepView = step?.view;
-  const beat = s.scenario.beat;
   const scenarioId = s.scenario.id;
-  useEffect(() => {
-    if (stepView) setView(stepView);
-  }, [stepView, beat, scenarioId]);
-
-  const agentBadge = s.notifs.some((n) => n.to === 'agent') || s.lateAlert !== undefined;
-  const clientBadge = s.notifs.some((n) => n.to === 'client');
   const total = stepsOf(s).length;
-  // Scénario client : seul le parcours du client compte, le téléphone du coiffeur est caché.
+  // 1 seul téléphone par scénario : celui du client dans le scénario client, celui du coiffeur dans les autres.
+  // Le coiffeur pilote sa file avec son seul téléphone : la démo ne montre pas ce que voient ses clients.
   const clientOnly = scenarioId === 'client';
 
   return (
     <div className="shell">
       <div className="demobar" role="toolbar" aria-label="Contrôles de la démo">
-        {!wide && !clientOnly && (
-          <div className="seg seg-dark" role="tablist">
-            <button role="tab" aria-selected={view === 'client'} className={view === 'client' ? 'on' : ''} onClick={() => setView('client')}>
-              Client{view !== 'client' && clientBadge && <i className="dot" />}
-            </button>
-            <button role="tab" aria-selected={view === 'agent'} className={view === 'agent' ? 'on' : ''} onClick={() => setView('agent')}>
-              Coiffeur{view !== 'agent' && agentBadge && <i className="dot" />}
-            </button>
-          </div>
-        )}
         <span className="clock" aria-label="Heure simulée">
           {fmt(s.now)}
         </span>
@@ -75,7 +53,7 @@ export function App() {
       </div>
 
       <div className="guide" aria-live="polite">
-        <span className="guide-count">{step ? `${beat + 1}/${total}` : '✓'}</span>
+        <span className="guide-count">{step ? `${s.scenario.beat + 1}/${total}` : '✓'}</span>
         {step ? (
           <>
             <span className="guide-text">{step.text}</span>
@@ -99,37 +77,18 @@ export function App() {
         )}
       </div>
 
-      {clientOnly ? (
-        <div className={wide ? 'stage' : 'single'}>
-          {wide ? (
-            <figure className="device">
-              <figcaption>Téléphone du client</figcaption>
-              <div className="device-screen">
-                <ClientApp />
-              </div>
-            </figure>
-          ) : (
-            <ClientApp />
-          )}
-        </div>
-      ) : wide ? (
-        <div className="stage">
+      <div className={wide ? 'stage' : 'single'}>
+        {wide ? (
           <figure className="device">
-            <figcaption>Téléphone du client</figcaption>
-            <div className="device-screen">
-              <ClientApp />
-            </div>
+            <figcaption>{clientOnly ? 'Téléphone du client' : 'Téléphone du coiffeur'}</figcaption>
+            <div className="device-screen">{clientOnly ? <ClientApp /> : <AgentApp />}</div>
           </figure>
-          <figure className="device">
-            <figcaption>Téléphone du coiffeur</figcaption>
-            <div className="device-screen">
-              <AgentApp />
-            </div>
-          </figure>
-        </div>
-      ) : (
-        <div className="single">{view === 'client' ? <ClientApp /> : <AgentApp />}</div>
-      )}
+        ) : clientOnly ? (
+          <ClientApp />
+        ) : (
+          <AgentApp />
+        )}
+      </div>
 
       {menu && (
         <Sheet title="Jouer un scénario" onClose={() => setMenu(false)}>

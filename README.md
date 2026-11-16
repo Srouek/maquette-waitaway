@@ -26,10 +26,9 @@ Le site est servi à `https://<compte>.github.io/<dépôt>/`. Il marche dans n'i
 
 ## Utiliser pendant une présentation
 
-- **Sur un téléphone** : la barre du haut bascule entre la vue **Client** et la vue **Coiffeur**. Un point doré signale une notification en attente dans l'autre vue.
-- **Sur un ordinateur** (900 px et plus) : les 2 téléphones s'affichent côte à côte.
+- **1 seul téléphone par scénario** : celui du coiffeur dans les 2 scénarios coiffeur, car il pilote sa file avec son seul téléphone, et celui du client dans le scénario client. Sur un ordinateur (900 px et plus), il s'affiche dans un cadre de téléphone.
 - **⋯** lance 1 des 3 scénarios, toujours depuis son début.
-- **Le bandeau sous l'heure** guide le scénario, étape par étape. Il affiche soit une consigne à faire sur le téléphone (« Scanne le QR code de ton poste »), soit un bouton doré qui saute au moment suivant (« Aller à la pause du matin »). Sur un téléphone, il bascule seul sur la bonne vue.
+- **Le bandeau sous l'heure** guide le scénario, étape par étape. Il affiche soit une consigne à faire sur le téléphone (« Scanne le QR code de ton poste »), soit un bouton doré qui saute au moment suivant (« Aller à la pause du matin »).
 - **« +5 min » et ▶** restent libres : +5 min avance d'un coup, ▶ fait passer 1 minute toutes les 2 secondes.
 - **Le temps démarre seul** quand le coiffeur ouvre sa file. Il s'arrête quand le coiffeur doit agir (pause à démarrer, client en retard, walk-in à ajouter, demande après la fermeture) et repart ensuite.
 - **La reprise après une pause se fait par le scan du QR code du poste** (QA-31). Tant que le coiffeur n'a pas scanné, aucun client ne peut démarrer sa prestation, même après l'heure prévue. Scanné avant la fin, le client confirmé en position 1 voit le coiffeur revenir et scanne le poste 2 min après : il gagne le reste de la pause.
@@ -57,7 +56,7 @@ Le compte « The Best Barber » (bestbarber@barber.fr) se connecte, scanne le QR
 | 16h23 | Il scanne le QR code de son ticket | Le walk-in devient Tom, avec ses prestations (QA-27). Il confirme lui-même sa présence 10 min avant son tour, comme les autres clients (règle 11) |
 | 17h30 | Kylian s'inscrit, il finira vers 19h00 | La journée est pleine |
 | 18h20 | Lucas demande 30 min, il finirait à 19h30 | Demande après la fermeture : le coiffeur accepte ou refuse |
-| 18h20 | Le téléphone client (Romain) demande 40 min, il finirait vers 20h10 | Refusé d'office : plus de 30 min après la fermeture. Avec une fin de journée plus tardive, voir sous le tableau |
+| 18h20 | Romain demande 40 min, il finirait vers 20h10 | Refusé d'office : plus de 30 min après la fermeture. Le coiffeur ne voit rien. Avec une fin de journée plus tardive, voir sous le tableau |
 | 19h00 ou 19h30 | Le saut s'arrête 5 min avant la fin de la dernière prestation. Le coiffeur ferme tout de suite, ou attend la notification « Plus personne n'attend » | Fermeture depuis l'application, sans scan, refusée tant qu'un client attend |
 | Après la fermeture | « Ton dégradé / fade a dépassé 2 fois aujourd'hui. Passer de 30 à 35 min ? » | Suggestion jamais appliquée seule (S20). Sans réponse, elle revient à l'ouverture suivante |
 
@@ -141,6 +140,6 @@ src/
 ├── client/     # écrans du client
 ├── agent/      # écrans du coiffeur (agent)
 ├── ui/         # icônes, scan simulé, roulette, notifications, panneaux
-├── App.tsx     # barre de démo, bandeau guide, 1 ou 2 téléphones selon la largeur
+├── App.tsx     # barre de démo, bandeau guide, le téléphone du scénario
 └── styles.css  # tokens (couleurs, typo, rayons) puis composants
 ```

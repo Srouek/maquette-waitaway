@@ -1,13 +1,11 @@
 import { CATALOG } from './catalog';
 import { SALON_START, salonFiles, salonHook, salonSteps } from './salon';
 import { AGENT_FILE_ID, MATHIS_FILE_ID, MATHIS_PRESTATIONS, defaultWeek, h } from './data';
-import { advanceUntil, durationSuggestions, fileById, inService, myTicket, pauseEnd, reducer, remaining, syncClock, waiting, type Action } from './engine';
+import { advanceUntil, durationSuggestions, fileById, inService, pauseEnd, reducer, remaining, syncClock, waiting, type Action } from './engine';
 import type { Arrival, PauseId, QueueFile, ScenarioId, SimState } from './types';
 
 /** 1 étape du guide affiché sous la barre de démo. */
 export type Step = {
-  /** Le téléphone concerné : sur petit écran, la démo bascule dessus. */
-  view: 'client' | 'agent';
   /** La consigne, ou ce que le saut va montrer. */
   text: string;
   /** Libellé du bouton de saut dans le temps. Sans lui, l'étape est une consigne à faire à la main. */
@@ -72,22 +70,20 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     label: 'Coiffeur : ma journée',
     hint: 'The Best Barber ouvre sa file à 9h00. Clients, 3 pauses, un retard, des walk-in, la fermeture.',
     steps: [
-      { view: 'agent', text: 'Connecte-toi : ton e-mail, puis le code reçu par e-mail.', until: (s) => s.agent.loggedIn },
-      { view: 'agent', text: 'Scanne le QR code de ton poste, puis valide tes prestations, tes pauses et ton heure de fin.', until: (s) => agentQueue(s).open },
-      { view: 'agent', text: 'Ta file est vide.', jump: 'Aller à 9h15 : 1er client', until: (s) => s.now >= h(9, 15) && !!ticket(s, 'Louis') },
-      { view: 'agent', text: 'Louis est inscrit, déjà au salon.', jump: 'Louis scanne le QR du poste', until: (s) => ticket(s, 'Louis')?.startedAt !== undefined },
-      { view: 'agent', text: 'Sa prestation tourne.', jump: 'Aller à 9h40 : 4 inscriptions', until: (s) => s.now >= h(9, 40) },
+      { text: 'Connecte-toi : ton e-mail, puis le code reçu par e-mail.', until: (s) => s.agent.loggedIn },
+      { text: 'Scanne le QR code de ton poste, puis valide tes prestations, tes pauses et ton heure de fin.', until: (s) => agentQueue(s).open },
+      { text: 'Ta file est vide.', jump: 'Aller à 9h15 : 1er client', until: (s) => s.now >= h(9, 15) && !!ticket(s, 'Louis') },
+      { text: 'Louis est inscrit, déjà au salon.', jump: 'Louis scanne le QR du poste', until: (s) => ticket(s, 'Louis')?.startedAt !== undefined },
+      { text: 'Sa prestation tourne.', jump: 'Aller à 9h40 : 4 inscriptions', until: (s) => s.now >= h(9, 40) },
       {
-        view: 'agent',
         text: 'Regarde où ta pause du matin s’est placée dans la file. Louis va dépasser : à 5 min de dépassement, les clients qui passent bientôt et ne sont pas au salon sont prévenus, sans geste de ta part.',
         jump: 'Aller à la pause du matin',
         until: (s) => pauseCalled(s, 'matin'),
       },
-      { view: 'agent', text: scanPause, until: (s) => pauseHandled(s, 'matin') },
-      { view: 'agent', text: 'Tu es en pause.', jump: 'Aller à 5 min de la fin de la pause', until: (s) => pauseNear(s, 'matin') },
-      { view: 'agent', text: scanResume, until: (s) => pauseResumed(s, 'matin') || !agentQueue(s).open },
+      { text: scanPause, until: (s) => pauseHandled(s, 'matin') },
+      { text: 'Tu es en pause.', jump: 'Aller à 5 min de la fin de la pause', until: (s) => pauseNear(s, 'matin') },
+      { text: scanResume, until: (s) => pauseResumed(s, 'matin') || !agentQueue(s).open },
       {
-        view: 'agent',
         text: 'Adam te voit revenir et scanne le QR du poste : taper fade et barbe.',
         jump: 'Aller au tour de Léo',
         // Après un gros retard le matin, la pause de midi peut passer avant Léo : l'étape suivante saute alors.
@@ -95,18 +91,16 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         then: stopClock,
       },
       {
-        view: 'agent',
         text: announceLeo,
         until: (s) => ticket(s, 'Léo')?.startedAt === undefined || leoHandled(s),
       },
-      { view: 'agent', text: 'Les clients concernés sont prévenus et la file est recalculée.', jump: 'Aller à la pause de midi', until: (s) => pauseCalled(s, 'midi') },
-      { view: 'agent', text: scanPause, until: (s) => pauseHandled(s, 'midi') },
-      { view: 'agent', text: 'Tu déjeunes.', jump: 'Aller à 5 min de la reprise', until: (s) => pauseNear(s, 'midi') },
-      { view: 'agent', text: scanResume, until: (s) => pauseResumed(s, 'midi') || !agentQueue(s).open },
+      { text: 'Les clients concernés sont prévenus et la file est recalculée.', jump: 'Aller à la pause de midi', until: (s) => pauseCalled(s, 'midi') },
+      { text: scanPause, until: (s) => pauseHandled(s, 'midi') },
+      { text: 'Tu déjeunes.', jump: 'Aller à 5 min de la reprise', until: (s) => pauseNear(s, 'midi') },
+      { text: scanResume, until: (s) => pauseResumed(s, 'midi') || !agentQueue(s).open },
       // Si la pause de midi est passée avant Léo (coiffeur en retard le matin), l'annonce de son retard se fait ici.
       // Sinon ces 2 étapes sautent : Léo a déjà démarré, et son retard est déjà annoncé ou constaté.
       {
-        view: 'agent',
         text: 'Léo passe bientôt : sa prestation sera plus longue que prévu.',
         jump: 'Aller au tour de Léo',
         until: (s) => ticket(s, 'Léo')?.startedAt !== undefined || leoHandled(s),
@@ -114,38 +108,33 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
           if (!leoHandled(s)) stopClock(s);
         },
       },
-      { view: 'agent', text: announceLeo, until: leoHandled },
+      { text: announceLeo, until: leoHandled },
       // Après un retard annoncé le matin, la pause de midi peut passer avant Léo : Théo n'est alors plus le 1er
       // à la reprise. L'étape attend qu'il soit en position 1, poste libre. Sinon, elle saute.
       {
-        view: 'agent',
         text: 'Tu as repris. Théo, inscrit à 12h20, est le prochain.',
         jump: 'Aller au tour de Théo',
         until: (s) => ticket(s, 'Théo')?.lateNotifiedAt !== undefined && !inService(agentQueue(s)) && waiting(agentQueue(s))[0]?.name === 'Théo',
       },
       {
-        view: 'agent',
         text: 'C’est l’heure de Théo et il n’est pas là. Un passant vient d’entrer : touche l’alerte et prends-le en walk-in, en gardant ou en retirant Théo.',
         until: (s) => ticket(s, 'Théo')?.lateNotifiedAt !== undefined && s.lateAlert === undefined,
       },
       {
-        view: 'agent',
         text: 'Regarde les heures de la file : elles ont bougé avec ta décision.',
         jump: 'Aller à la fin de sa prestation',
         until: (s) => ticket(s, 'Théo')?.abortAt !== undefined || ticket(s, 'Théo')?.startedAt !== undefined || s.lateAlert !== undefined,
       },
       {
-        view: 'agent',
         text: 'Théo n’est toujours pas là. Touche l’alerte et retire-le : les clients derrière lui avancent.',
         until: (s) => ticket(s, 'Théo')?.abortAt !== undefined || ticket(s, 'Théo')?.startedAt !== undefined,
       },
-      { view: 'agent', text: 'L’après-midi se déroule.', jump: 'Aller à la pause de l’après-midi', until: (s) => pauseCalled(s, 'aprem') },
-      { view: 'agent', text: scanPause, until: (s) => pauseHandled(s, 'aprem') },
-      { view: 'agent', text: 'Tu es en pause.', jump: 'Aller à 5 min de la fin de la pause', until: (s) => pauseNear(s, 'aprem') },
-      { view: 'agent', text: scanResume, until: (s) => pauseResumed(s, 'aprem') || !agentQueue(s).open },
+      { text: 'L’après-midi se déroule.', jump: 'Aller à la pause de l’après-midi', until: (s) => pauseCalled(s, 'aprem') },
+      { text: scanPause, until: (s) => pauseHandled(s, 'aprem') },
+      { text: 'Tu es en pause.', jump: 'Aller à 5 min de la fin de la pause', until: (s) => pauseNear(s, 'aprem') },
+      { text: scanResume, until: (s) => pauseResumed(s, 'aprem') || !agentQueue(s).open },
       // Le 1er client après la reprise dépend du retard pris par le coiffeur. File vide à la reprise : l'étape saute.
       {
-        view: 'agent',
         text: 'Le client confirmé te voit revenir : il scanne le QR du poste dans 2 min.',
         until: (s) =>
           startedAfterResume(s, 'aprem') ||
@@ -154,54 +143,29 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         then: stopClock,
       },
       {
-        view: 'agent',
         text: 'Un homme entre sans avoir scanné le QR code. Pour le garder : « Ajouter un client », avec une durée. Il attend son tour au salon.',
         until: (s) => !!guest(s),
       },
       {
-        view: 'agent',
         text: 'Pendant son attente, il scanne le QR code de son ticket et s’inscrit.',
         jump: 'Aller à son inscription',
         until: (s) => guest(s)?.claimedAt !== undefined,
       },
-      { view: 'agent', text: 'Les clients continuent de s’inscrire jusqu’au soir.', jump: 'Aller à la fin de journée', until: (s) => !!ticket(s, 'Lucas') },
+      { text: 'Les clients continuent de s’inscrire jusqu’au soir.', jump: 'Aller à la fin de journée', until: (s) => !!ticket(s, 'Lucas') },
       {
-        view: 'agent',
         text: 'Lucas veut une place qui finit après ta fermeture. Il est au salon et te le demande : accepte ou refuse.',
         until: (s) => ticket(s, 'Lucas')?.overtime !== 'pending',
-        // Le téléphone client est posé sur une prestation de 40 min, prêt à demander une place lui aussi.
-        then: (s) => {
-          stopClock(s);
-          // Romain a déjà un compte : il demande une place sans passer par la création de compte.
-          if (!s.me.firstName) s.me = { ...s.me, firstName: 'Romain', lastName: 'Girard', email: 'romain.girard@exemple.fr', favorites: ['degrade'] };
-          if (!myTicket(s)) s.clientNav = { screen: 'choose', fileId: AGENT_FILE_ID, preselect: ['mulet'] };
-        },
+        then: stopClock,
+      },
+      // Fermeture à 19h00 : Romain finirait plus de 30 min après, il est refusé d'office et le coiffeur ne voit rien.
+      // L'étape saute. Fermeture à 20h00 ou plus tard : sa demande arrive chez le coiffeur.
+      {
+        text: 'Romain demande aussi une place, pour 40 min : accepte ou refuse.',
+        until: (s) => ticket(s, 'Romain')?.overtime !== 'pending',
       },
       {
-        view: 'client',
-        text: 'Côté client : Romain veut aussi passer, pour 40 min. Touche « Prendre ma place ». Fermeture à 19h00 : il finirait plus de 30 min après, c’est refusé d’office. Fermeture à 20h00 ou plus tard : sa demande arrive chez toi.',
-        until: (s) => (s.clientNav.screen === 'choose' && s.clientNav.tried === true) || !!myTicket(s),
-      },
-      {
-        view: 'agent',
-        text: 'Romain a demandé une place : accepte ou refuse.',
-        until: (s) => myTicket(s)?.ticket.overtime !== 'pending',
-      },
-      {
-        view: 'agent',
         text: 'Plus personne ne s’inscrit.',
         jump: 'Aller à 5 min de la fin de la dernière prestation',
-        until: (s) => waiting(agentQueue(s)).every((t) => t.behavior === 'moi') && remaining(agentQueue(s), s.now) <= 5,
-      },
-      {
-        view: 'client',
-        text: 'Côté client : c’est le tour de Romain. Touche Scan devant le poste.',
-        until: (s) => !waiting(agentQueue(s)).some((t) => t.behavior === 'moi'),
-      },
-      {
-        view: 'agent',
-        text: 'Dernière prestation de la journée.',
-        jump: 'Aller à 5 min de la fin de sa prestation',
         until: (s) => waiting(agentQueue(s)).length === 0 && remaining(agentQueue(s), s.now) <= 5,
         // Le temps repart : sans geste du coiffeur, la prestation finit et la notification de fermeture arrive.
         then: (s) => {
@@ -209,12 +173,10 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         },
       },
       {
-        view: 'agent',
         text: 'Dernière prestation, 5 min au plus. Touche « Fermer ma file » pour la terminer et fermer, ou attends sa fin : une notification t’invitera à fermer.',
         until: (s) => !agentQueue(s).open,
       },
       {
-        view: 'agent',
         text: 'Ta file est fermée. Ton dégradé a dépassé 2 fois aujourd’hui : réponds à la suggestion.',
         until: (s) => durationSuggestions(agentQueue(s)).length === 0,
       },
@@ -234,10 +196,10 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     label: 'Coiffeur : je crée mon compte',
     hint: 'E-mail et code, profil, prestations, horaires et pauses de la semaine.',
     steps: [
-      { view: 'agent', text: 'Le gérant a validé ton adresse. Saisis ton e-mail, puis le code reçu.', until: (s) => s.agent.loggedIn },
-      { view: 'agent', text: 'Renseigne ton profil.', until: (s) => s.agent.setup !== 'profil' },
-      { view: 'agent', text: 'Choisis les prestations que tu proposes et règle leur durée.', until: (s) => s.agent.setup !== 'prestations' },
-      { view: 'agent', text: 'Vérifie tes horaires. Le crayon ouvre un jour : début, pauses, fin.', until: (s) => s.agent.setup === 'done' },
+      { text: 'Le gérant a validé ton adresse. Saisis ton e-mail, puis le code reçu.', until: (s) => s.agent.loggedIn },
+      { text: 'Renseigne ton profil.', until: (s) => s.agent.setup !== 'profil' },
+      { text: 'Choisis les prestations que tu proposes et règle leur durée.', until: (s) => s.agent.setup !== 'prestations' },
+      { text: 'Vérifie tes horaires. Le crayon ouvre un jour : début, pauses, fin.', until: (s) => s.agent.setup === 'done' },
     ],
   },
 };
@@ -291,7 +253,7 @@ const evening = (name: string, at: number, prestationIds: string[], minEnd: numb
  * Les trous entre les inscriptions de l'après-midi rattrapent un walk-in plus long que prévu.
  *
  * Fin de journée plus tardive : Lucas arrive 40 min avant la fermeture, la file est vide et il s'inscrit
- * normalement. La demande du téléphone client (40 min) finit alors 30 min après la fermeture : elle arrive
+ * normalement. La demande de Romain (40 min), juste après lui, finit alors 30 min après la fermeture : elle arrive
  * chez le coiffeur. À 21h00, 22h00 et 23h00, 2 clients du soir par heure en plus occupent le coiffeur
  * et repartent avant l'arrivée de Lucas (fermeture - 40 min). Les fins à 19h00 et 20h00 n'en ont pas.
  */
@@ -317,6 +279,8 @@ const JOURNEE: Arrival[] = [
   evening('Martin', h(21, 10), ['crop'], h(23)),
   evening('Alexandre', h(21, 40), ['classique'], h(23)),
   { fileId: AGENT_FILE_ID, name: 'Lucas', prestationIds: ['degrade'], behavior: 'ponctuel', beforeEnd: 40 },
+  // Après Lucas : sa demande passe derrière lui. Refusée d'office si la fin de journée est à 19h00.
+  { fileId: AGENT_FILE_ID, name: 'Romain', prestationIds: ['mulet'], behavior: 'ponctuel', beforeEnd: 40 },
   { fileId: MATHIS_FILE_ID, name: 'Bastien', prestationIds: ['degrade'], behavior: 'ponctuel', at: h(9, 10) },
   { fileId: MATHIS_FILE_ID, name: 'Rémi', prestationIds: ['taper', 'barbe-express'], behavior: 'ponctuel', at: h(9, 30) },
 ];
@@ -340,7 +304,6 @@ export function buildScenario(id: ScenarioId): SimState {
   };
 
   if (id === 'pro-journee') {
-    // Le téléphone client montre la même page d'accueil que le scénario client. Romain n'y entre qu'à la fin.
     s.script = JOURNEE;
     s.claim = { after: 10, name: 'Tom', prestationIds: ['buzz', 'barbe-express'] };
     // Dans ce scénario, le compte est celui du salon, pas d'un coiffeur nommé.

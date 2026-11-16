@@ -42,7 +42,7 @@ const ticketIn = (s: SimState, fileId: string, name: string) => fileById(s, file
 const remiOverrun = (s: SimState) => ticketIn(s, 'julien', 'Rémi')?.overrun ?? 0;
 const onScreen = (s: SimState, screen: SimState['clientNav']['screen']) => s.clientNav.screen === screen;
 
-const c = (text: string, until: (s: SimState) => boolean, jump?: string): Step => ({ view: 'client', text, until, jump });
+const c = (text: string, until: (s: SimState) => boolean, jump?: string): Step => ({ text, until, jump });
 
 /** Questionnaire de satisfaction, envoyé dès que la prestation est close. */
 const rateStep: Step = c('Ta prestation est terminée : note-la et laisse un commentaire si tu veux.', (s) => gone(s) || mine(s)!.rating !== undefined);
