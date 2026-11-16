@@ -26,7 +26,11 @@ export type Ticket = {
   /** Le walk-in a scanné le QR code de son ticket : il a maintenant un nom et des prestations (QA-27). */
   claimedAt?: number;
   confirmedAt?: number;
+  /** Rappel choisi par le client, en min avant son tour : un simple « mets-toi en route ». Absent : pas de rappel. */
+  reminder?: number;
   remindedAt?: number;
+  /** Invitation à confirmer sa présence, 10 min avant son tour. Le re-scan du salon n'est accepté qu'à partir d'elle. */
+  invitedAt?: number;
   calledAt?: number;
   lateNotifiedAt?: number;
   /** Dernière décision de l'agent sur ce retard (attendre, prendre quelqu'un d'autre). */
@@ -40,10 +44,22 @@ export type Ticket = {
   eta?: number;
   doneAt?: number;
   /** Avis du client sur sa prestation, ou `skipped` s'il a choisi « Plus tard ». Hors backlog (16/11/2026). */
-  rating?: { stars: number; comment?: string; at: number } | 'skipped';
+  rating?: Rating | 'skipped';
   abortAt?: number;
   abortReason?: 'self' | 'rejected_by_agent' | 'incident';
   rejectMotif?: string;
+};
+
+/** Avis du client. Il garde ce qu'il note : le salon, le coiffeur et la coupe. Hors backlog, QA-34. */
+export type Rating = {
+  stars: number;
+  comment?: string;
+  /** Simulation : seul le fait qu'une photo est jointe est gardé, pas l'image. */
+  photo?: boolean;
+  store: string;
+  agentName: string;
+  prestations: string[];
+  at: number;
 };
 
 export type PauseId = 'matin' | 'midi' | 'aprem';

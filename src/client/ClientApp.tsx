@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { STORE } from '../sim/data';
 import { fmt, myTicket, prestationsOf, projectedStart, ticketLabel } from '../sim/engine';
 import { useSim } from '../sim/store';
@@ -118,7 +118,7 @@ function Done({ file, ticket }: { file: QueueFile; ticket: Ticket }) {
         {ticketLabel(file, ticket)} avec {file.agentName}, en {ticket.doneAt! - ticket.startedAt!} min.
       </p>
       {ticket.rating === undefined ? (
-        <Survey agentName={file.agentName} />
+        <Survey file={file} ticket={ticket} />
       ) : (
         <p className="muted">{ticket.rating === 'skipped' ? `À bientôt chez ${STORE.name}.` : `Merci pour ton avis. À bientôt chez ${STORE.name}.`}</p>
       )}
@@ -131,14 +131,28 @@ function Done({ file, ticket }: { file: QueueFile; ticket: Ticket }) {
   );
 }
 
-/** Questionnaire de satisfaction, à la fin de la prestation. Hors backlog. */
-function Survey({ agentName }: { agentName: string }) {
+/**
+ * Questionnaire de satisfaction, à la fin de la prestation (QA-34, épic à cadrer). L'avis garde le salon, le coiffeur
+ * et la coupe. La photo vient de l'appareil du client : souvent un selfie pris au salon, avec la coupe du jour.
+ */
+function Survey({ file, ticket }: { file: QueueFile; ticket: Ticket }) {
   const { dispatch } = useSim();
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState('');
+  const [photo, setPhoto] = useState<string | null>(null);
+  // Simulation : l'image reste dans le navigateur le temps de l'écran, elle n'est ni envoyée ni sauvegardée.
+  useEffect(() => () => void (photo && URL.revokeObjectURL(photo)), [photo]);
   return (
     <section className="panel survey">
-      <h2 className="section">Comment s&rsquo;est passée ta prestation avec {agentName} ?</h2>
+      <h2 className="section">Ton avis sur ta prestation</h2>
+      <dl className="survey-about">
+        <dt>Salon</dt>
+        <dd>{STORE.name}</dd>
+        <dt>Coiffeur</dt>
+        <dd>{file.agentName}</dd>
+        <dt>Coupe</dt>
+        <dd>{ticketLabel(file, ticket)}</dd>
+      </dl>
       <div className="stars" role="radiogroup" aria-label="Note de 1 à 5">
         {[1, 2, 3, 4, 5].map((n) => (
           <button key={n} role="radio" aria-checked={stars === n} aria-label={`${n} sur 5`} className={n <= stars ? 'on' : ''} onClick={() => setStars(n)}>
@@ -150,7 +164,29 @@ function Survey({ agentName }: { agentName: string }) {
         Un commentaire ? (facultatif)
         <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
       </label>
-      <button className="btn btn-primary btn-lg" disabled={stars === 0} onClick={() => dispatch({ type: 'rate', stars, comment })}>
+      {photo ? (
+        <figure className="survey-photo">
+          <img src={photo} alt="Ta photo, jointe à ton avis" />
+          <button className="link" onClick={() => setPhoto(null)}>
+            Retirer la photo
+          </button>
+        </figure>
+      ) : (
+        <label className="btn btn-outline btn-lg survey-add">
+          Ajouter une photo de ta coupe
+          <input
+            type="file"
+            accept="image/*"
+            capture="user"
+            className="visually-hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) setPhoto(URL.createObjectURL(file));
+            }}
+          />
+        </label>
+      )}
+      <button className="btn btn-primary btn-lg" disabled={stars === 0} onClick={() => dispatch({ type: 'rate', stars, comment, photo: photo !== null })}>
         Envoyer mon avis
       </button>
       <button className="btn btn-outline btn-lg" onClick={() => dispatch({ type: 'rate' })}>

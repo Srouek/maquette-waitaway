@@ -1,5 +1,5 @@
 import { CATALOG } from './catalog';
-import { AGENT_FILE_ID, PAUSE_LABEL, mkTicket } from './data';
+import { AGENT_FILE_ID, PAUSE_LABEL, STORE, mkTicket } from './data';
 import type { AgentEvent, ClientNav, DayPlan, Pause, PauseId, PausePlan, QueueFile, SimState, Ticket } from './types';
 
 // ---------- Sélecteurs ----------
@@ -207,11 +207,36 @@ export const todayPlan = (s: SimState): DayPlan => s.agent.week[s.weekday];
  * Ce que fait le bouton Scan du client. Dans la vraie application, c'est le QR code scanné qui décide.
  * La maquette n'a pas de caméra : elle choisit le QR code attendu selon l'état du ticket.
  */
+/**
+ * Ce que vise le bouton Scan du client. Une fois sa présence confirmée, il vise toujours le poste du coiffeur :
+ * un scan trop tôt est refusé par le garde-fou (S14), qui dit pourquoi.
+ */
 export function nextScan(s: SimState): 'store' | 'confirm' | 'start' {
   const m = myTicket(s);
   if (!m || m.ticket.startedAt !== undefined || m.ticket.abortAt !== undefined) return 'store';
-  if (m.ticket.confirmedAt === undefined) return 'confirm';
-  return position(m.file, m.ticket.id) === 1 ? 'start' : 'confirm';
+  return m.ticket.confirmedAt === undefined ? 'confirm' : 'start';
+}
+
+/** Le client est invité à confirmer sa présence à 10 min de son tour. Le re-scan du salon n'est accepté qu'à partir de là. */
+export const CONFIRM_WINDOW = 10;
+/** Sans confirmation à 5 min de son tour, le client est en retard : l'agent est prévenu (`customer.late`, S37). */
+export const LATE_AFTER = 5;
+/**
+ * S14b : le scan du poste est refusé s'il reste plus de 10 min à la prestation en cours, comme la confirmation.
+ * C'est ce scan qui clôt le ticket précédent. Décision de Gabi du 16/11/2026 (avant : 15 min ou plus).
+ */
+export const START_GUARD = 10;
+/** Les réglages du rappel personnel, en min avant le tour. */
+export const REMINDER_OPTIONS = [20, 25, 30, 35, 40, 45, 50, 55, 60];
+
+/**
+ * Re-scan du QR code du salon. Décision de Gabi du 16/11/2026 : la confirmation se fait entre 10 et 5 min avant le
+ * tour du client. Avant, elle est refusée. Après 5 min, elle reste acceptée, mais l'agent a déjà été prévenu du retard.
+ */
+export function canConfirm(f: QueueFile, ticketId: string, now: number): string | null {
+  const wait = waitFor(f, ticketId, now);
+  if (wait <= CONFIRM_WINDOW) return null;
+  return `Trop tôt pour confirmer ta présence : ton tour est vers ${fmt(now + wait)}. Tu pourras scanner à partir de ${fmt(now + wait - CONFIRM_WINDOW)}.`;
 }
 
 // ---------- Contrôles, côté « serveur » ----------
@@ -249,7 +274,7 @@ export function canStart(f: QueueFile, ticketId: string, now: number): string | 
   if (run) return `${f.agentName} n’a pas encore repris sa file. Ton tour vient dès son retour.`;
   if (pauseDue(f, now)) return `${f.agentName} prend sa pause. Ton tour vient juste après.`;
   const rem = remaining(f, now);
-  if (rem >= 15) return `${f.agentName} termine encore avec un client. Réessaie dans ${rem - 14} min.`;
+  if (rem > START_GUARD) return `${f.agentName} termine encore avec un client. Réessaie dans ${rem - START_GUARD} min.`;
   return null;
 }
 
@@ -280,9 +305,9 @@ export type Action =
   | { type: 'clientStart' }
   | { type: 'leave' }
   | { type: 'claim'; prestationIds: string[] }
-  | { type: 'rate'; stars?: number; comment?: string }
+  | { type: 'rate'; stars?: number; comment?: string; photo?: boolean }
   | { type: 'clearMyTicket' }
-  | { type: 'setReminder'; minutes: number }
+  | { type: 'setReminder'; minutes: number | null }
   | { type: 'agentLogin'; email: string }
   | { type: 'agentProfile'; firstName: string; lastName: string; metier: string }
   | { type: 'agentPrestations'; minutes: Record<string, number> }
@@ -619,14 +644,24 @@ function observe(s: SimState, f: QueueFile) {
     if (t.behavior === 'retard' && t.confirmedAt === undefined && t.lateNotifiedAt !== undefined && s.now - t.lateNotifiedAt >= 8)
       t.confirmedAt = s.now;
 
-    // Rappel : notify.presence
-    if (isMine(s, t) && t.confirmedAt === undefined && t.remindedAt === undefined && wait <= s.me.reminderMinutes) {
+    // Rappel personnel : un simple « mets-toi en route », au délai choisi par le client. Il ne l'invite pas à scanner.
+    // Écart avec S16 : il invitait à revenir confirmer. Décision de Gabi du 16/11/2026.
+    if (
+      isMine(s, t) && t.confirmedAt === undefined && t.remindedAt === undefined && t.invitedAt === undefined &&
+      t.reminder !== undefined && wait <= t.reminder && wait > CONFIRM_WINDOW
+    ) {
       t.remindedAt = s.now;
-      notify(s, 'client', 'Ton tour approche', `Encore ${wait} min environ. Reviens au salon et touche Scan.`);
+      notify(s, 'client', 'Mets-toi en route', `Ton tour chez ${f.agentName} est vers ${fmt(s.now + wait)}. Tu pourras confirmer ta présence à partir de ${fmt(s.now + wait - CONFIRM_WINDOW)}.`);
     }
 
-    // Retardataire : customer.late, seulement chez l'agent (S37)
-    if (i === 0 && f.id === AGENT_FILE_ID && t.confirmedAt === undefined && t.lateNotifiedAt === undefined && wait < 10) {
+    // Invitation à confirmer : notify.presence, 10 min avant le tour.
+    if (isMine(s, t) && t.confirmedAt === undefined && t.invitedAt === undefined && wait <= CONFIRM_WINDOW) {
+      t.invitedAt = s.now;
+      notify(s, 'client', 'Confirme ta présence', `Ton tour est dans ${wait} min environ. Au salon, touche Scan pour confirmer que tu es là.`);
+    }
+
+    // Retardataire : customer.late, seulement chez l'agent (S37), 5 min avant le tour.
+    if (i === 0 && f.id === AGENT_FILE_ID && t.confirmedAt === undefined && t.lateNotifiedAt === undefined && wait < LATE_AFTER) {
       t.lateNotifiedAt = s.now;
       s.lateAlert = { fileId: f.id, ticketId: t.id };
       notify(s, 'agent', `${t.name} n’a pas confirmé`, `Son tour est dans ${wait} min.`);
@@ -725,9 +760,15 @@ export function reducer(state: SimState, a: Action): SimState {
       // Écart : les prestations favorites (QA-10) sont classées « hors démo » dans le backlog.
       s.me.favorites = s.me.favorites.includes(a.id) ? s.me.favorites.filter((x) => x !== a.id) : [...s.me.favorites, a.id];
       break;
-    case 'setReminder':
-      s.me.reminderMinutes = a.minutes;
+    case 'setReminder': {
+      // null : pas de rappel pour ce ticket. Le réglage du compte reste le dernier délai choisi.
+      if (a.minutes !== null) s.me.reminderMinutes = a.minutes;
+      const m = myTicket(s);
+      // Un rappel déjà dépassé partirait tout de suite : il est ignoré.
+      if (m && m.ticket.remindedAt === undefined && (a.minutes === null || a.minutes < waitFor(m.file, m.ticket.id, s.now)))
+        m.ticket.reminder = a.minutes ?? undefined;
       break;
+    }
     case 'join': {
       if (canJoin(s, a.fileId, a.prestationIds)) break;
       const f = fileById(s, a.fileId);
@@ -738,14 +779,19 @@ export function reducer(state: SimState, a: Action): SimState {
       if (end !== undefined) askOvertime(s, t, end);
       // Confirmation à l'inscription : moins de 10 min avant son tour (S38).
       else if (wait < 10) t.confirmedAt = s.now;
+      // Le rappel n'a de sens que s'il tombe dans le futur.
+      else if (wait > s.me.reminderMinutes) t.reminder = s.me.reminderMinutes;
       f.tickets.push(t);
       s.me.ticketRef = { fileId: f.id, ticketId: t.id };
       s.clientNav = { screen: 'joined' };
+      // Scénario client : l'inscription lance le temps, comme l'ouverture de file côté coiffeur.
+      if (s.autoAgent) s.playing = true;
       break;
     }
     case 'confirm': {
       const m = myTicket(s);
-      if (m) m.ticket.confirmedAt ??= s.now;
+      if (!m || canConfirm(m.file, m.ticket.id, s.now)) break;
+      m.ticket.confirmedAt ??= s.now;
       s.clientNav = { screen: 'confirmed' };
       break;
     }
@@ -774,16 +820,28 @@ export function reducer(state: SimState, a: Action): SimState {
       if (!t || a.prestationIds.length === 0) break;
       claimTicket(s, f, t, s.me.firstName ?? 'Toi', a.prestationIds);
       t.behavior = 'moi';
+      if (t.confirmedAt === undefined && waitFor(f, t.id, s.now) > s.me.reminderMinutes) t.reminder = s.me.reminderMinutes;
       s.me.walkIn = undefined;
       s.me.ticketRef = { fileId: f.id, ticketId: t.id };
       s.clientNav = { screen: 'joined' };
+      if (s.autoAgent) s.playing = true;
       break;
     }
     case 'rate': {
       // Sans note : le client a choisi « Plus tard ».
       const m = myTicket(s);
       if (!m || m.ticket.doneAt === undefined || m.ticket.rating !== undefined) break;
-      m.ticket.rating = a.stars ? { stars: a.stars, comment: a.comment?.trim() || undefined, at: s.now } : 'skipped';
+      m.ticket.rating = a.stars
+        ? {
+            stars: a.stars,
+            comment: a.comment?.trim() || undefined,
+            photo: a.photo || undefined,
+            store: STORE.name,
+            agentName: m.file.agentName,
+            prestations: prestationsOf(m.file, m.ticket.prestationIds).map((p) => p.label),
+            at: s.now,
+          }
+        : 'skipped';
       break;
     }
     case 'clearMyTicket':

@@ -39,6 +39,7 @@ const gone = (s: SimState) => {
   return !t || t.abortAt !== undefined;
 };
 const ticketIn = (s: SimState, fileId: string, name: string) => fileById(s, fileId).tickets.find((t) => t.name === name);
+const remiOverrun = (s: SimState) => ticketIn(s, 'julien', 'Rémi')?.overrun ?? 0;
 const onScreen = (s: SimState, screen: SimState['clientNav']['screen']) => s.clientNav.screen === screen;
 
 const c = (text: string, until: (s: SimState) => boolean, jump?: string): Step => ({ view: 'client', text, until, jump });
@@ -50,20 +51,32 @@ const rateStep: Step = c('Ta prestation est terminée : note-la et laisse un com
 const joinSteps = (chooseText = 'Choisis 1 ou plusieurs prestations, puis « Prendre ma place ».'): Step[] => [
   c(chooseText, (s) => !onScreen(s, 'choose') || !!mine(s)),
   c('Crée ton compte : avec Google, ou par e-mail.', (s) => !!mine(s)),
-  c('Choisis quand être prévenu, puis valide.', (s) => !onScreen(s, 'joined') || gone(s)),
+  c('Choisis si tu veux un rappel pour partir au salon, puis valide.', (s) => !onScreen(s, 'joined') || gone(s)),
 ];
+
+/** Le client a reçu son invitation à confirmer, ou a déjà confirmé. */
+const invited = (s: SimState) => mine(s)!.invitedAt !== undefined || mine(s)!.confirmedAt !== undefined;
 
 /** La fin du parcours, commune à tous les cas. Une étape déjà vraie saute (client déjà confirmé, par exemple). */
 const tailSteps = (
   waitText = 'Tu es libre d’attendre où tu veux.',
-  confirmText = 'Tu es revenu au salon : touche Scan pour confirmer ta présence.',
+  confirmText = 'Tu es invité à confirmer ta présence. Tu es au salon : touche Scan.',
 ): Step[] => [
-  c(waitText, (s) => gone(s) || mine(s)!.remindedAt !== undefined || mine(s)!.confirmedAt !== undefined, 'Aller au rappel'),
+  c(waitText, (s) => gone(s) || mine(s)!.remindedAt !== undefined || invited(s), 'Aller à la prochaine notification'),
+  c(
+    'Ton rappel : mets-toi en route. Tu pourras confirmer ta présence 10 min avant ton tour. Si tu scannes le salon avant, l’application refuse et te dit à partir de quand.',
+    (s) => gone(s) || invited(s),
+    'Aller à 10 min de ton tour',
+  ),
   c(confirmText, (s) => gone(s) || mine(s)!.confirmedAt !== undefined),
   c('Vérifie ta prestation, puis valide.', (s) => gone(s) || !onScreen(s, 'confirmed')),
-  c('Ta présence est confirmée.', (s) => gone(s) || mine(s)!.calledAt !== undefined || mine(s)!.startedAt !== undefined, 'Aller à ton tour'),
   c(
-    'C’est ton tour : touche Scan devant le poste du coiffeur. Si tu scannes trop tôt, l’application refuse et te dit pourquoi.',
+    'Ta présence est confirmée.',
+    (s) => gone(s) || mine(s)!.calledAt !== undefined || mine(s)!.startedAt !== undefined,
+    'Aller à ton tour',
+  ),
+  c(
+    'C’est ton tour : touche Scan devant le poste du coiffeur.',
     (s) => gone(s) || mine(s)!.startedAt !== undefined,
   ),
   c('Ta prestation est en cours.', (s) => gone(s) || mine(s)!.doneAt !== undefined, 'Aller à la fin de la prestation'),
@@ -111,15 +124,22 @@ export const BARBERS: Barber[] = [
     events: [{ at: h(9, 48), do: 'announce', minutes: 10 }],
     steps: [
       ...joinSteps(),
-      c('Ton tour est vers 10h00. Ne reviens pas encore au salon.', (s) => (ticketIn(s, 'julien', 'Rémi')?.overrun ?? 0) >= 10, 'Aller à 9h48'),
+      // Chaque étape cède aussi quand le client a avancé seul (confirmé, ou prestation démarrée) : sinon le guide
+      // attendrait un dépassement qui n'arrive plus, Rémi ayant été clos par le démarrage du client.
+      c('Ton tour est vers 10h00. Attends où tu veux.', (s) => gone(s) || remiOverrun(s) >= 10 || invited(s), 'Aller à 9h48'),
       c(
         'Julien sait que sa prestation en cours sera plus longue : il annonce 10 min de retard, ta nouvelle heure est dans la notification.',
-        (s) => (ticketIn(s, 'julien', 'Rémi')?.overrun ?? 0) >= 15,
+        (s) => gone(s) || invited(s),
+        'Aller à la prochaine notification',
+      ),
+      c(
+        'Tu es invité à confirmer ta présence. Pour voir la notification de dépassement, ne scanne pas encore.',
+        (s) => gone(s) || remiOverrun(s) >= 15 || ticketIn(s, 'julien', 'Rémi')?.doneAt !== undefined || mine(s)!.confirmedAt !== undefined,
         'Aller 5 min après la nouvelle heure',
       ),
       ...tailSteps(
         'Tu es libre d’attendre où tu veux.',
-        'Julien n’a toujours pas fini : 5 min de retard constatées, nouvelle notification. Si tu avais confirmé ta présence, tu ne recevrais rien : tu serais au salon. Reviens et touche Scan pour confirmer.',
+        'Julien n’a toujours pas fini : 5 min de retard constatées, nouvelle notification. Si tu avais confirmé ta présence, tu ne l’aurais pas reçue : tu serais au salon. Touche Scan pour confirmer.',
       ),
     ],
   },
@@ -137,7 +157,13 @@ export const BARBERS: Barber[] = [
     steps: [
       ...joinSteps(),
       c('Ton tour est dans plus d’1 h. Tu es libre d’attendre où tu veux.', (s) => ticketIn(s, 'thomas', 'Kevin')?.abortAt !== undefined, 'Aller à 10h00'),
-      ...tailSteps('Un client devant toi a quitté la file : ton tour avance de 30 min, la notification te donne ta nouvelle heure.'),
+      // Le rappel peut tomber au même moment que le gain : l'explication a sa propre étape, qui attend l'invitation.
+      c(
+        'Un client devant toi a quitté la file : ton tour avance de 30 min, la notification te donne ta nouvelle heure.',
+        (s) => gone(s) || invited(s),
+        'Aller à 10 min de ton tour',
+      ),
+      ...tailSteps(),
     ],
   },
   {
@@ -149,9 +175,9 @@ export const BARBERS: Barber[] = [
     events: [{ afterMyTurn: 3, do: 'replaceMine', minutes: 30 }],
     steps: [
       ...joinSteps(),
-      c('Tu es libre d’attendre où tu veux.', (s) => gone(s) || mine(s)!.remindedAt !== undefined || mine(s)!.confirmedAt !== undefined, 'Aller au rappel'),
+      c('Tu es libre d’attendre où tu veux.', (s) => gone(s) || invited(s), 'Aller à 10 min de ton tour'),
       c(
-        'Cette fois, tu traînes : ne reviens pas au salon et ne scanne pas.',
+        'Tu es invité à confirmer ta présence. Cette fois, tu traînes : ne reviens pas au salon et ne scanne pas.',
         (s) => gone(s) || mine(s)!.confirmedAt !== undefined,
         'Aller à 3 min après ton tour',
       ),
@@ -179,7 +205,7 @@ export const BARBERS: Barber[] = [
         'Damien ferme à 10h15 aujourd’hui : ta prestation finirait après. Choisis-en une, puis « Demander une place ». Plus de 30 min après la fermeture, c’est refusé d’office : essaie aussi.',
       ).slice(0, 2),
       c('Ta demande est envoyée. Damien est au salon, tu lui en parles.', (s) => gone(s) || mine(s)!.overtime !== 'pending', 'Aller à sa réponse'),
-      c('Damien a accepté : ta place vaut confirmation de présence. Choisis quand être prévenu, puis valide.', (s) => !onScreen(s, 'joined') || gone(s)),
+      c('Damien a accepté : ta place vaut confirmation de présence, pas besoin de rappel. Valide.', (s) => !onScreen(s, 'joined') || gone(s)),
       ...tailSteps(),
     ],
   },
@@ -215,8 +241,8 @@ export const BARBERS: Barber[] = [
       ),
       c('Ta place est gardée. Choisis tes prestations : sa durée devient la leur. Puis « Récupérer ma place ».', (s) => !onScreen(s, 'choose') || !!mine(s)),
       c('Crée ton compte : avec Google, ou par e-mail.', (s) => !!mine(s)),
-      c('Choisis quand être prévenu, puis valide.', (s) => !onScreen(s, 'joined') || gone(s)),
-      ...tailSteps('Ton tour est dans 10 min ou plus : tu n’es plus confirmé, tu peux sortir du salon. Le rappel te fera revenir.'),
+      c('Choisis si tu veux un rappel pour partir au salon, puis valide.', (s) => !onScreen(s, 'joined') || gone(s)),
+      ...tailSteps('Ton tour est dans 10 min ou plus : tu n’es plus confirmé, tu peux sortir du salon. L’invitation à confirmer te fera revenir.'),
     ],
   },
 ];

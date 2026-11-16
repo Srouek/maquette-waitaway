@@ -3,8 +3,8 @@ import { agentLate } from './engine';
 import { buildScenario, guideReducer, type GuideAction } from './scenarios';
 import type { SimState } from './types';
 
-// v6 : scénario client à 8 coiffeurs (1 cas par coiffeur), événements des coiffeurs simulés, walk-in côté client. Un état plus ancien est ignoré.
-const KEY = 'waitaway-demo-v6';
+// v7 : rappel personnel, invitation à confirmer 10 min avant le tour, avis avec salon, coiffeur, coupe et photo. Un état plus ancien est ignoré.
+const KEY = 'waitaway-demo-v7';
 
 function load(): SimState {
   try {

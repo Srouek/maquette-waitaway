@@ -172,6 +172,8 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         // Le téléphone client est posé sur une prestation de 40 min, prêt à demander une place lui aussi.
         then: (s) => {
           stopClock(s);
+          // Romain a déjà un compte : il demande une place sans passer par la création de compte.
+          if (!s.me.firstName) s.me = { ...s.me, firstName: 'Romain', lastName: 'Girard', email: 'romain.girard@exemple.fr', favorites: ['degrade'] };
           if (!myTicket(s)) s.clientNav = { screen: 'choose', fileId: AGENT_FILE_ID, preselect: ['mulet'] };
         },
       },
@@ -327,7 +329,7 @@ export function buildScenario(id: ScenarioId): SimState {
     weekday: TUESDAY,
     files: [kf, mf],
     agent: { loggedIn: false, setup: 'done', email: 'antoine@salonleclos.fr', firstName: 'Antoine', lastName: 'Lefèvre', week: defaultWeek() },
-    me: { favorites: [], reminderMinutes: 10 },
+    me: { favorites: [], reminderMinutes: 30 },
     clientNav: { screen: 'home' },
     notifs: [],
     script: [],
@@ -338,9 +340,7 @@ export function buildScenario(id: ScenarioId): SimState {
   };
 
   if (id === 'pro-journee') {
-    // Le téléphone client a déjà un compte : il sert à la fin, pour l'inscription refusée.
-    s.me = { firstName: 'Romain', lastName: 'Girard', email: 'romain.girard@exemple.fr', favorites: ['degrade'], reminderMinutes: 10 };
-    s.clientNav = { screen: 'account' };
+    // Le téléphone client montre la même page d'accueil que le scénario client. Romain n'y entre qu'à la fin.
     s.script = JOURNEE;
     s.claim = { after: 10, name: 'Tom', prestationIds: ['buzz', 'barbe-express'] };
     // Dans ce scénario, le compte est celui du salon, pas d'un coiffeur nommé.
