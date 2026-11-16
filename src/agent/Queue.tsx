@@ -54,10 +54,11 @@ export function QueueScreen({ file }: { file: QueueFile }) {
   const slots = timeline(file, s.now).filter((x) => !(x.kind === 'pause' && (x.pause.id === run?.id || x.pause.id === due?.id)));
   const startPause = (p: Pause) => scan.start('QR du poste de ' + file.agentName, () => dispatch({ type: 'startPause', id: p.id }));
   const resume = () => scan.start('QR du poste de ' + file.agentName, () => dispatch({ type: 'resume' }));
-  // QA-28 : l'agent ferme sa file en scannant le QR File/Station.
-  const closeByScan = (current?: 'terminer' | 'rejeter') => {
+  // QA-28, décision de Gabi le 16/11/2026 : la fermeture se fait depuis l'application, sans scan du poste.
+  // En cas de problème, l'agent doit pouvoir fermer depuis son téléphone, même loin de son poste.
+  const close = (current?: 'terminer' | 'rejeter') => {
     setPanel(null);
-    scan.start('QR du poste de ' + file.agentName, () => dispatch({ type: 'closeFile', current }));
+    dispatch({ type: 'closeFile', current });
   };
 
   // L'alerte de retard a disparu (client arrivé, retiré) : son panneau se ferme.
@@ -218,7 +219,7 @@ export function QueueScreen({ file }: { file: QueueFile }) {
         />
       )}
       {panel?.kind === 'walkin' && <WalkInSheet file={file} onClose={() => setPanel(null)} />}
-      {panel?.kind === 'close' && <CloseSheet file={file} onClose={() => setPanel(null)} onScan={closeByScan} />}
+      {panel?.kind === 'close' && <CloseSheet file={file} onClose={() => setPanel(null)} onConfirm={close} />}
       {panel?.kind === 'delay' && run && <DelaySheet file={file} pause={run} onClose={() => setPanel(null)} />}
       {panel?.kind === 'incident' && <IncidentSheet file={file} onClose={() => setPanel(null)} />}
       {scan.node}
@@ -581,7 +582,7 @@ function WalkInSheet({ file, onClose }: { file: QueueFile; onClose: () => void }
 }
 
 /** Fermeture de file (QA-28). */
-function CloseSheet({ file, onClose, onScan }: { file: QueueFile; onClose: () => void; onScan: (current?: 'terminer' | 'rejeter') => void }) {
+function CloseSheet({ file, onClose, onConfirm }: { file: QueueFile; onClose: () => void; onConfirm: (current?: 'terminer' | 'rejeter') => void }) {
   const n = waiting(file).length;
   const cur = inService(file);
 
@@ -602,19 +603,18 @@ function CloseSheet({ file, onClose, onScan }: { file: QueueFile; onClose: () =>
       {cur ? (
         <>
           <p>{cur.name} est encore sur le fauteuil.</p>
-          <button className="btn btn-primary btn-lg" onClick={() => onScan('terminer')}>
-            Terminer sa prestation, scanner et fermer
+          <button className="btn btn-primary btn-lg" onClick={() => onConfirm('terminer')}>
+            Terminer sa prestation et fermer
           </button>
-          <button className="btn btn-danger-outline btn-lg" onClick={() => onScan('rejeter')}>
-            Retirer {cur.name}, scanner et fermer
+          <button className="btn btn-danger-outline btn-lg" onClick={() => onConfirm('rejeter')}>
+            Retirer {cur.name} et fermer
           </button>
-          <p className="muted small">Pour fermer, scanne le QR code de ton poste.</p>
         </>
       ) : (
         <>
-          <p className="muted">Plus personne ne pourra s&rsquo;inscrire chez toi aujourd&rsquo;hui. Pour fermer, scanne le QR code de ton poste.</p>
-          <button className="btn btn-primary btn-lg" onClick={() => onScan()}>
-            Scanner pour fermer
+          <p className="muted">Plus personne ne pourra s&rsquo;inscrire chez toi aujourd&rsquo;hui.</p>
+          <button className="btn btn-primary btn-lg" onClick={() => onConfirm()}>
+            Fermer ma file
           </button>
         </>
       )}

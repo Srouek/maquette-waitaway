@@ -399,7 +399,7 @@ function observe(s: SimState, f: QueueFile) {
   }
   if (playedByUser(s, f) && closeDue(f, s.now) && f.closeHintAt === undefined) {
     f.closeHintAt = s.now;
-    notify(s, 'agent', 'Plus personne n’attend', 'Ta journée est finie. Scanne le QR code de ton poste pour fermer ta file.');
+    notify(s, 'agent', 'Plus personne n’attend', 'Ta journée est finie. Touche « Fermer ma file ».');
   }
   // QA-27, règles 3 et 4 : le walk-in scanne le QR code de son ticket pendant son attente.
   // Le ticket prend son nom et ses prestations, et sa durée devient celle des prestations.

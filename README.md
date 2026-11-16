@@ -57,7 +57,7 @@ Le compte « The Best Barber » (bestbarber@barber.fr) se connecte, scanne le QR
 | 17h30 | Kylian s'inscrit, il finira pile à 19h00 | La journée est pleine |
 | 18h20 | Lucas demande 30 min, il finirait à 19h30 | Demande après la fermeture : le coiffeur accepte ou refuse |
 | 18h20 | Le téléphone client (Romain) demande 40 min, il finirait vers 20h10 | Refusé d'office : plus de 30 min après la fermeture. Avec une fin de journée plus tardive, voir sous le tableau |
-| 19h00 ou 19h30 | Le saut s'arrête 5 min avant la fin de la dernière prestation. Le coiffeur ferme tout de suite, ou attend la notification « Plus personne n'attend » | Fermeture par le scan du QR code du poste (QA-28), refusée tant qu'un client attend |
+| 19h00 ou 19h30 | Le saut s'arrête 5 min avant la fin de la dernière prestation. Le coiffeur ferme tout de suite, ou attend la notification « Plus personne n'attend » | Fermeture depuis l'application, sans scan, refusée tant qu'un client attend |
 
 Un walk-in que le coiffeur ajoute sans qu'il rattache son ticket reste « En route » s'il passe dans plus de 10 min. Quand son tour approche, la pop-up de retard s'ouvre chez le coiffeur, qui touche « Il est au salon : confirmer » (QA-27, règle 12).
 
@@ -89,7 +89,7 @@ E-mail et code reçu par e-mail, profil, choix des prestations et de leur durée
 | Coiffeur | Retard au retour de pause, fermeture de file sur imprévu | QA-32, QA-33 |
 | Coiffeur | Alerte `customer.late` : attendre, walk-in, client présent, retirer | S37 |
 | Coiffeur | Walk-in par ticket anonyme, à durée libre, avec QR code | S44, QA-27 |
-| Coiffeur | Fermeture de file par scan du poste, refusée tant que des clients attendent | QA-28 |
+| Coiffeur | Fermeture de file depuis l'application, refusée tant que des clients attendent | QA-28 |
 
 ## Écarts avec le backlog
 
