@@ -66,14 +66,13 @@ Un walk-in que le coiffeur ajoute sans qu'il rattache son ticket reste « En rou
 
 ### Client : je m'inscris
 
-Mardi 9h40, dans le salon. Le client scanne le QR code de l'entrée et voit 8 coiffeurs. Chacun montre 1 cas, indiqué par une étiquette sous son nom. Choisir un coiffeur lance son cas. Le téléphone du coiffeur est caché : le scénario ne montre que ce que le client reçoit ou fait. Tant qu'il n'a pas de ticket, le client peut revenir au salon et essayer un autre coiffeur. Le cas va jusqu'à la fin de la prestation, sauf quand le ticket disparaît.
+Mardi 9h40, dans le salon. Le client scanne le QR code de l'entrée et voit 7 coiffeurs. Chacun montre 1 cas, indiqué par une étiquette sous son nom. Choisir un coiffeur lance son cas. Le téléphone du coiffeur est caché : le scénario ne montre que ce que le client reçoit ou fait. Tant qu'il n'a pas de ticket, le client peut revenir au salon et essayer un autre coiffeur. Le cas va jusqu'à la fin de la prestation, sauf quand le ticket disparaît.
 
 | Coiffeur | Cas | Ce que le client vit |
 |---|---|---|
 | Antoine | Parcours normal | Tour vers 10h20. Rappel « Mets-toi en route » au délai choisi, invitation à confirmer à 10h10, Scan pour confirmer, « C'est ton tour », Scan du poste, prestation |
 | Mathis | Premier de la file | Tour dans moins de 10 min : confirmé dès l'inscription (S38). Il scanne le poste, ou quitte la file |
 | Julien | Retard du coiffeur | 9h48 : « Julien annonce 10 min de retard », nouvelle heure. 10h15 : « Julien a 5 min de retard ». S'il a déjà confirmé, il ne reçoit rien (S20) |
-| Thomas | Le tour avance | 10h00 : un client devant lui quitte la file, « Ton tour avance de 30 min » |
 | Nicolas | Client en retard | Il reçoit l'invitation à confirmer mais ne revient pas. 3 min après son tour : « Nicolas a retiré ton ticket », motif « Client absent » (S37, S23) |
 | Damien | Après la fermeture | Damien ferme à 10h15 : « Demander une place », Damien accepte 2 min après, la place vaut confirmation. Au-delà de 30 min après la fermeture, refus d'office (QA-20, QA-30) |
 | Bruno | Imprévu | 10h00 : « Bruno a dû fermer sa file », ticket retiré (QA-33) |

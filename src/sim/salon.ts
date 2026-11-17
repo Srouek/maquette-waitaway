@@ -90,7 +90,7 @@ const tailSteps = (
   rateStep,
 ].map((st, i) => (skip && i < skip.first ? { ...st, canSkip: skip.why } : st));
 
-// ---------- Les 8 coiffeurs ----------
+// ---------- Les 7 coiffeurs ----------
 
 export const BARBERS: Barber[] = [
   {
@@ -151,6 +151,10 @@ export const BARBERS: Barber[] = [
       ),
     ],
   },
+  // Cas « Le tour avance » mis de côté (décision de Gabi, 17/11/2026) : l'attente tombe d'un coup de 60 à 30 min,
+  // ce qu'un client ne peut pas anticiper s'il n'est pas déjà dans le coin. À reprendre dans un futur scénario
+  // où le coiffeur propose au client de venir plus tôt, s'il le souhaite.
+  /*
   {
     id: 'thomas',
     name: 'Thomas',
@@ -174,6 +178,7 @@ export const BARBERS: Barber[] = [
       ...tailSteps(undefined, undefined, { first: 2, why: ALREADY_SHOWN }),
     ],
   },
+  */
   {
     id: 'nicolas',
     name: 'Nicolas',

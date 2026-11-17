@@ -214,7 +214,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   client: {
     id: 'client',
     label: 'Client : je m’inscris',
-    hint: '8 coiffeurs, 8 cas : parcours normal, premier de la file, retard du coiffeur, tour qui avance, client en retard, après la fermeture, imprévu, walk-in.',
+    hint: '7 coiffeurs, 7 cas : parcours normal, premier de la file, retard du coiffeur, client en retard, après la fermeture, imprévu, walk-in.',
     steps: [],
   },
 
