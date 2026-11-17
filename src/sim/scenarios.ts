@@ -14,6 +14,11 @@ export type Step = {
   until: (s: SimState) => boolean;
   /** Mise en place faite à la fin de l'étape. */
   then?: (s: SimState) => void;
+  /**
+   * L'étape a le droit de ne jamais s'afficher, parce que sa condition est déjà vraie quand elle arrive. Le texte dit
+   * dans quel cas. Sans ce champ, `npm run replay` signale l'étape sautée comme une erreur.
+   */
+  canSkip?: string;
 };
 
 export type Scenario = { id: ScenarioId; label: string; hint: string; steps: Step[] };
@@ -50,6 +55,9 @@ const startedAfterResume = (s: SimState, id: PauseId) => {
   const p = pause(s, id);
   return p?.endedAt !== undefined && agentQueue(s).tickets.some((t) => t.startedAt !== undefined && t.startedAt >= p.endedAt!);
 };
+/** Raisons des sauts autorisés, partagées par plusieurs étapes. */
+const LEO_AFTER_MIDI = 'coiffeur en retard le matin : la pause de midi passe avant Léo';
+const LEO_BEFORE_MIDI = 'le retard de Léo est déjà annoncé avant la pause de midi';
 const announceLeo = 'Léo veut un dégradé avec un motif : ce sera plus long que prévu. Touche sa carte et annonce un retard.';
 /** Léo a un retard annoncé ou constaté, ou n'est plus à servir. */
 const leoHandled = (s: SimState) => {
@@ -93,8 +101,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       {
         text: announceLeo,
         until: (s) => ticket(s, 'Léo')?.startedAt === undefined || leoHandled(s),
+        canSkip: LEO_AFTER_MIDI,
       },
-      { text: 'Les clients concernés sont prévenus et la file est recalculée.', jump: 'Aller à la pause de midi', until: (s) => pauseCalled(s, 'midi') },
+      {
+        text: 'Les clients concernés sont prévenus et la file est recalculée.',
+        jump: 'Aller à la pause de midi',
+        until: (s) => pauseCalled(s, 'midi'),
+        canSkip: LEO_AFTER_MIDI,
+      },
       { text: scanPause, until: (s) => pauseHandled(s, 'midi') },
       { text: 'Tu déjeunes.', jump: 'Aller à 5 min de la reprise', until: (s) => pauseNear(s, 'midi') },
       { text: scanResume, until: (s) => pauseResumed(s, 'midi') || !agentQueue(s).open },
@@ -107,8 +121,9 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         then: (s) => {
           if (!leoHandled(s)) stopClock(s);
         },
+        canSkip: LEO_BEFORE_MIDI,
       },
-      { text: announceLeo, until: leoHandled },
+      { text: announceLeo, until: leoHandled, canSkip: LEO_BEFORE_MIDI },
       // Après un retard annoncé le matin, la pause de midi peut passer avant Léo : Théo n'est alors plus le 1er
       // à la reprise. L'étape attend qu'il soit en position 1, poste libre. Sinon, elle saute.
       {
@@ -128,6 +143,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       {
         text: 'Théo n’est toujours pas là. Touche l’alerte et retire-le : les clients derrière lui avancent.',
         until: (s) => ticket(s, 'Théo')?.abortAt !== undefined || ticket(s, 'Théo')?.startedAt !== undefined,
+        canSkip: 'Théo a déjà été retiré à l’étape de l’alerte',
       },
       { text: 'L’après-midi se déroule.', jump: 'Aller à la pause de l’après-midi', until: (s) => pauseCalled(s, 'aprem') },
       { text: scanPause, until: (s) => pauseHandled(s, 'aprem') },
@@ -156,12 +172,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         text: 'Lucas veut une place qui finit après ta fermeture. Il est au salon et te le demande : accepte ou refuse.',
         until: (s) => ticket(s, 'Lucas')?.overtime !== 'pending',
         then: stopClock,
+        canSkip: 'fin de journée à 20h00 ou plus tard : Lucas s’inscrit normalement',
       },
       // Fermeture à 19h00 : Romain finirait plus de 30 min après, il est refusé d'office et le coiffeur ne voit rien.
       // L'étape saute. Fermeture à 20h00 ou plus tard : sa demande arrive chez le coiffeur.
       {
         text: 'Romain demande aussi une place, pour 40 min : accepte ou refuse.',
         until: (s) => ticket(s, 'Romain')?.overtime !== 'pending',
+        canSkip: 'fin de journée à 19h00 : Romain est refusé d’office',
       },
       {
         text: 'Plus personne ne s’inscrit.',

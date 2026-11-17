@@ -54,13 +54,20 @@ const joinSteps = (chooseText = 'Choisis 1 ou plusieurs prestations, puis « Pre
   c('Choisis si tu veux un rappel pour partir au salon, puis valide.', (s) => !onScreen(s, 'joined') || gone(s)),
 ];
 
+/** Raison du saut des 2 premières étapes de `tailSteps` dans les cas qui montrent déjà l'attente. */
+const ALREADY_SHOWN = 'le cas a déjà montré l’attente et l’invitation à confirmer';
+
 /** Le client a reçu son invitation à confirmer, ou a déjà confirmé. */
 const invited = (s: SimState) => mine(s)!.invitedAt !== undefined || mine(s)!.confirmedAt !== undefined;
 
-/** La fin du parcours, commune à tous les cas. Une étape déjà vraie saute (client déjà confirmé, par exemple). */
+/**
+ * La fin du parcours, commune à tous les cas. Une étape déjà vraie saute (client déjà confirmé, par exemple).
+ * `skip` autorise les `first` premières étapes à sauter, pour la raison `why` (voir `canSkip` et `npm run replay`).
+ */
 const tailSteps = (
   waitText = 'Tu es libre d’attendre où tu veux.',
   confirmText = 'Tu es invité à confirmer ta présence. Tu es au salon : touche Scan.',
+  skip?: { first: number; why: string },
 ): Step[] => [
   c(waitText, (s) => gone(s) || mine(s)!.remindedAt !== undefined || invited(s), 'Aller à la prochaine notification'),
   c(
@@ -81,7 +88,7 @@ const tailSteps = (
   ),
   c('Ta prestation est en cours.', (s) => gone(s) || mine(s)!.doneAt !== undefined, 'Aller à la fin de la prestation'),
   rateStep,
-];
+].map((st, i) => (skip && i < skip.first ? { ...st, canSkip: skip.why } : st));
 
 // ---------- Les 8 coiffeurs ----------
 
@@ -140,6 +147,7 @@ export const BARBERS: Barber[] = [
       ...tailSteps(
         'Tu es libre d’attendre où tu veux.',
         'Julien n’a toujours pas fini : 5 min de retard constatées, nouvelle notification. Si tu avais confirmé ta présence, tu ne l’aurais pas reçue : tu serais au salon. Touche Scan pour confirmer.',
+        { first: 2, why: ALREADY_SHOWN },
       ),
     ],
   },
@@ -163,7 +171,7 @@ export const BARBERS: Barber[] = [
         (s) => gone(s) || invited(s),
         'Aller à 10 min de ton tour',
       ),
-      ...tailSteps(),
+      ...tailSteps(undefined, undefined, { first: 2, why: ALREADY_SHOWN }),
     ],
   },
   {
@@ -186,7 +194,7 @@ export const BARBERS: Barber[] = [
         (s) => !mine(s) || mine(s)!.confirmedAt !== undefined,
       ),
       // Le client a confirmé malgré la consigne : il passe normalement.
-      ...tailSteps(),
+      ...tailSteps(undefined, undefined, { first: 8, why: 'ticket retiré : la suite ne sert que si le client a confirmé malgré la consigne' }),
     ],
   },
   {
@@ -206,7 +214,7 @@ export const BARBERS: Barber[] = [
       ).slice(0, 2),
       c('Ta demande est envoyée. Damien est au salon, tu lui en parles.', (s) => gone(s) || mine(s)!.overtime !== 'pending', 'Aller à sa réponse'),
       c('Damien a accepté : ta place vaut confirmation de présence, pas besoin de rappel. Valide.', (s) => !onScreen(s, 'joined') || gone(s)),
-      ...tailSteps(),
+      ...tailSteps(undefined, undefined, { first: 4, why: 'place acceptée après la fermeture : le client est confirmé d’office' }),
     ],
   },
   {

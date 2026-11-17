@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Affiche la maquette dans une iframe à la largeur demandée, pour la tester à 360 px dans une fenêtre de Chrome
+  qui ne se réduit pas. Servie par `npm run dev` seulement : elle n'entre pas dans le build.
+  http://127.0.0.1:5173/scripts/viewport.html?w=360   (largeur par défaut : 360)
+  http://127.0.0.1:5173/scripts/viewport.html?w=1024  (au-dessus de 900 px, le téléphone s'affiche dans un cadre)
+  1 seule iframe : 2 copies de la maquette sur la même origine s'écraseraient dans le localStorage.
+-->
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Maquette à largeur fixe</title>
+    <style>
+      body { margin: 0; padding: 16px; background: #ddd; font: 14px system-ui, sans-serif; }
+      p { margin: 0 0 8px; }
+      iframe { display: block; border: 1px solid #888; background: #fff; }
+    </style>
+  </head>
+  <body>
+    <p id="label"></p>
+    <iframe id="app" title="Maquette"></iframe>
+    <script>
+      const w = Number(new URLSearchParams(location.search).get('w')) || 360;
+      const h = w < 900 ? 780 : 900;
+      const f = document.getElementById('app');
+      f.width = String(w);
+      f.height = String(h);
+      f.src = '/';
+      document.getElementById('label').textContent = `Largeur ${w} px, hauteur ${h} px`;
+    </script>
+  </body>
+</html>
