@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-// Icônes de prestation, dessinées pour la maquette dans le style de `icon_exemple/` :
+// Icônes de prestation, dessinées pour la maquette dans le style des images de `exemple/` :
 // une silhouette claire sur une pastille sombre. Les couleurs viennent des tokens (voir `.picon`).
 // Classes : pi-fill (forme pleine), pi-soft (fondu), pi-line (trait gravé), pi-mark (trait clair),
 // pi-shade (zone grisée sur le visage : barbe, moustache).

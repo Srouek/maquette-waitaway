@@ -130,7 +130,7 @@ La maquette s'écarte de QueueAPI sur ces points. Chacun a son commentaire dans 
 | Prestations favorites | Affichées sur le compte | Classées « hors démo » (QA-10) |
 | Connexion Google | Simulée | Pas encore de token utilisable (QA-13) |
 
-Les 13 coupes et leurs descriptions viennent de [barberconcept.ch](https://barberconcept.ch/blog/choisir-son-style-coiffure-homme), réécrites. Les durées sont choisies pour la démo. Les icônes sont dessinées pour la maquette (`src/ui/icons.tsx`) ; `icon_exemple/` garde les images qui ont servi de modèle de style.
+Les 13 coupes et leurs descriptions viennent de [barberconcept.ch](https://barberconcept.ch/blog/choisir-son-style-coiffure-homme), réécrites. Les durées sont choisies pour la démo. Les icônes sont dessinées pour la maquette (`src/ui/icons.tsx`) ; `exemple/` (hors git) garde les images qui ont servi de modèle de style.
 
 ## Arborescence
 
