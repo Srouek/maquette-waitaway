@@ -246,3 +246,27 @@ export function useScan() {
   ) : null;
   return { start: (label: string, then: () => void) => setScan({ label, then }), node };
 }
+
+/**
+ * Cercle dégressif : l'arc part de midi, dans le sens horaire, et sa longueur vaut `ratio` (0 à 1) du tour.
+ * La couleur vient de la variable CSS `--ring` du parent, le contenu central de `children`.
+ */
+export function CountdownRing({ ratio, label, children }: { ratio: number; label: string; children: ReactNode }) {
+  const r = 52;
+  const c = 2 * Math.PI * r;
+  const k = Math.max(0, Math.min(1, ratio));
+  return (
+    <div className="ring" role="img" aria-label={label}>
+      <svg viewBox="0 0 120 120" aria-hidden>
+        <circle className="ring-track" cx="60" cy="60" r={r} />
+        <circle className="ring-arc" cx="60" cy="60" r={r} strokeDasharray={c} strokeDashoffset={c * (1 - k)} transform="rotate(-90 60 60)" />
+        <g className="ring-dot-turn" style={{ transform: `rotate(${k * 360}deg)` }}>
+          <circle className="ring-dot" cx="60" cy={60 - r} r="7" />
+        </g>
+      </svg>
+      <div className="ring-center" aria-hidden>
+        {children}
+      </div>
+    </div>
+  );
+}

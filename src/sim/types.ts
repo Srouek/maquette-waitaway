@@ -26,6 +26,8 @@ export type Ticket = {
   /** Le walk-in a scanné le QR code de son ticket : il a maintenant un nom et des prestations (QA-27). */
   claimedAt?: number;
   confirmedAt?: number;
+  /** Attente estimée à l'inscription du client, en minutes : le cercle du ticket est plein à cette valeur. Hors backlog. */
+  joinWait?: number;
   /** Rappel choisi par le client, en min avant son tour : un simple « mets-toi en route ». Absent : pas de rappel. */
   reminder?: number;
   remindedAt?: number;

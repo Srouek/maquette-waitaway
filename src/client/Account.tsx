@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { STORE } from '../sim/data';
 import {
   CONFIRM_WINDOW,
   REMINDER_OPTIONS,
@@ -7,12 +6,10 @@ import {
   canConfirm,
   canStart,
   fmt,
-  inService,
   myTicket,
   nextScan,
   pauseMinutesBefore,
   position,
-  prestationsOf,
   remaining,
   waitFor,
 } from '../sim/engine';
@@ -20,7 +17,7 @@ import { useSim } from '../sim/store';
 import type { QueueFile, Ticket } from '../sim/types';
 import { PrestationIcon, ScanIcon, StarIcon } from '../ui/icons';
 import { Sheet, Stepper } from '../ui/kit';
-import { PrestationList, TicketCard, findPrestation, type ScanFn } from './parts';
+import { TicketCard, findPrestation, type ScanFn } from './parts';
 
 /** Rappel personnel : de 20 à 60 min avant le tour, par pas de 5. Seuls les délais encore à venir sont proposés. */
 function ReminderChoice({ wait, value }: { wait: number; value?: number }) {
@@ -209,13 +206,25 @@ function Waiting({
   const { s } = useSim();
   const pos = position(file, ticket.id);
   const wait = waitFor(file, ticket.id, s.now);
-  const ahead = pos - 1 + (inService(file) ? 1 : 0);
   const confirmed = ticket.confirmedAt !== undefined;
   const pauseMin = pauseMinutesBefore(file, ticket.id, s.now);
   const soon = pos === 1 && remaining(file, s.now) <= START_GUARD && confirmed;
 
   return (
     <>
+      <TicketCard file={file} ticket={ticket} />
+      {pauseMin > 0 && (
+        <p className="muted small">
+          L&rsquo;attente compte {pauseMin} min de pause de {file.agentName}.
+        </p>
+      )}
+      {!confirmed && ticket.invitedAt === undefined && (
+        <p className="muted small">
+          {ticket.reminder !== undefined && ticket.remindedAt === undefined && `Rappel ${ticket.reminder} min avant ton tour. `}
+          Confirmation de présence à partir de {fmt(s.now + wait - CONFIRM_WINDOW)}.
+        </p>
+      )}
+
       {soon ? (
         <section className="panel panel-go">
           <p>
@@ -245,47 +254,6 @@ function Waiting({
       ) : null}
       {/* Un scan refusé hors du panneau « C'est bientôt à toi » s'affiche ici. */}
       {scanError && !soon && <p className="error">{scanError}</p>}
-
-      <section className="wait-card">
-        <div className="wait-head">
-          <span className="avatar" aria-hidden>
-            {file.agentName[0]}
-          </span>
-          <span className="file-who">
-            <strong>{STORE.name}</strong>
-            <span className="muted">
-              Avec {file.agentName}, {file.metier.toLowerCase()}
-            </span>
-          </span>
-          <span className={`chip ${confirmed ? 'chip-ok' : 'chip-wait'}`}>{confirmed ? 'Confirmé' : 'En route'}</span>
-        </div>
-        <div className="wait-facts">
-          <span>
-            <strong>{ahead}</strong>
-            {ahead > 1 ? 'personnes devant toi' : 'personne devant toi'}
-          </span>
-          <span>
-            <strong>{wait} min</strong>
-            d&rsquo;attente
-          </span>
-          <span>
-            <strong>{fmt(s.now + wait)}</strong>
-            ton tour
-          </span>
-        </div>
-        <PrestationList items={prestationsOf(file, ticket.prestationIds)} />
-        {pauseMin > 0 && (
-          <p className="muted small">
-            L&rsquo;attente compte {pauseMin} min de pause de {file.agentName}.
-          </p>
-        )}
-        {!confirmed && ticket.invitedAt === undefined && (
-          <p className="muted small">
-            {ticket.reminder !== undefined && ticket.remindedAt === undefined && `Rappel ${ticket.reminder} min avant ton tour. `}
-            Confirmation de présence à partir de {fmt(s.now + wait - CONFIRM_WINDOW)}.
-          </p>
-        )}
-      </section>
 
       <button className="link-danger link-inline" onClick={onLeave}>
         Quitter la file

@@ -13,6 +13,8 @@
   --chrome: #d5dae1;     /* bordures */
   --muted: #5b6577;
   --brass-light: #e2c48b; /* laiton clair : texte et boutons sur fond bleu nuit */
+  --oxblood-light: #e8806f; /* corail : « Tu as le temps » sur le ticket, lisible sur bleu nuit */
+  --mint-light: #5fcb98;    /* vert clair : « Tu es le prochain » sur le ticket, lisible sur bleu nuit */
   --brass-ink: #7a5413;   /* laiton foncé : texte sur fond laiton clair */
   --brass-line: #e6cf9f;
   --disabled: #9aa3b2;
@@ -225,13 +227,29 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 
 /* ---------- Ticket : l'élément fort ---------- */
 .ticket { border-radius: var(--r-lg); overflow: hidden; background: var(--surface); box-shadow: 0 12px 28px rgba(21,34,56,.14); }
-.ticket-main { background: var(--ink); color: var(--paper); padding: 22px 22px 20px; }
-.ticket-kicker { color: var(--brass-light); font-weight: 700; }
-.ticket-num {
-  font: 800 148px/0.9 var(--font-display); letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
-  margin: 6px 0 18px;
-}
-.ticket-num-next { color: var(--brass-light); }
+.ticket-main { display: grid; gap: 16px; text-align: center; background: var(--ink); color: var(--paper); padding: 22px 22px 20px; }
+.ticket-where { color: var(--brass-light); font-weight: 700; }
+.phase-temps { --ring: var(--oxblood-light); }
+.phase-route, .phase-arrive { --ring: var(--brass-light); }
+.phase-prochain { --ring: var(--mint-light); }
+.ticket-phase { display: grid; gap: 2px; }
+.ticket-phase span { font-size: 15px; opacity: .85; }
+.ticket-phase strong { font: 700 24px var(--font-display); color: var(--ring); }
+.ticket-main .ticket-facts { text-align: left; padding-top: 16px; border-top: 1px solid var(--night-line); }
+.ticket-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+.ticket-line strong { min-width: 0; }
+
+/* Cercle minuteur : se vide à mesure que le tour approche */
+.ring { position: relative; justify-self: center; width: min(210px, 100%); aspect-ratio: 1; }
+.ring svg { display: block; width: 100%; height: 100%; }
+.ring-track, .ring-arc { fill: none; stroke-width: 9; }
+.ring-track { stroke: var(--night-line); }
+.ring-arc { stroke: var(--ring); stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
+.ring-dot { fill: var(--ring); }
+.ring-dot-turn { transform-origin: 60px 60px; transition: transform .6s ease; }
+.ring-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; }
+.ring-num { font: 800 84px/0.9 var(--font-display); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.ring-unit { font-size: 20px; opacity: .85; }
 .ticket-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ticket-facts span { display: grid; font-size: 15px; opacity: .85; }
 .ticket-facts strong { font: 700 24px var(--font-display); opacity: 1; }
@@ -342,7 +360,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media (max-width: 360px) {
-  .ticket-num { font-size: 120px; }
+  .ring-num { font-size: 72px; }
   .display { font-size: 38px; }
 }
 
@@ -458,11 +476,5 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .account-head { display: flex; align-items: center; gap: 12px; }
 .account-name { flex: 1; min-width: 0; font: 700 26px var(--font-display); }
 .scan-btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; }
-.wait-card { display: grid; gap: 14px; padding: 16px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--chrome); box-shadow: 0 8px 20px rgba(21,34,56,.08); }
-.wait-head { display: flex; align-items: center; gap: 12px; }
-.wait-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 0; border-block: 1px solid var(--chrome); }
-.wait-facts span { display: grid; font-size: 14px; color: var(--muted); }
-.wait-facts strong { font: 700 24px var(--font-display); color: var(--ink); }
-.ticket-with { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; width: 100%; font-weight: 700; }
 .google { display: inline-grid; place-items: center; width: 26px; height: 26px; margin-right: 10px; border-radius: 50%; border: 2px solid var(--chrome); font: 800 15px var(--font-display); vertical-align: middle; }
 .field input[aria-invalid='true'] { border-color: var(--danger); }

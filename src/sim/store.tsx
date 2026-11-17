@@ -3,8 +3,8 @@ import { agentLate } from './engine';
 import { buildScenario, guideReducer, type GuideAction } from './scenarios';
 import type { SimState } from './types';
 
-// v7 : rappel personnel, invitation à confirmer 10 min avant le tour, avis avec salon, coiffeur, coupe et photo. Un état plus ancien est ignoré.
-const KEY = 'waitaway-demo-v7';
+// v8 : attente à l'inscription sur le ticket du client (`joinWait`), pour le cercle minuteur. Un état plus ancien est ignoré.
+const KEY = 'waitaway-demo-v8';
 
 function load(): SimState {
   try {

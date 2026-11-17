@@ -160,6 +160,27 @@ export const waitFor = (f: QueueFile, ticketId: string, now: number) => {
   return slot ? slot.start - now : 0;
 };
 
+/**
+ * Phases de l'attente affichées sur le ticket du client, d'après les minutes d'attente. Hors backlog : décision de
+ * Gabi du 17/11/2026 pour le cercle minuteur. Au-delà de 35 min, le client a le temps ; de 35 à 11 min, il se met en
+ * route ; de 10 à 6 min (la fenêtre de confirmation), son tour arrive ; à 5 min et moins, il est le prochain.
+ */
+export const WAIT_PHASE_EARLY = 35;
+export const WAIT_PHASE_NEXT = 5;
+export type WaitPhase = 'temps' | 'route' | 'arrive' | 'prochain';
+export const waitPhase = (wait: number): WaitPhase =>
+  wait > WAIT_PHASE_EARLY ? 'temps' : wait > CONFIRM_WINDOW ? 'route' : wait > WAIT_PHASE_NEXT ? 'arrive' : 'prochain';
+
+/**
+ * Part de l'attente qui reste, entre 0 et 1 : 1 à l'inscription (`joinWait`). Si le coiffeur prend du retard,
+ * l'attente dépasse `joinWait` et le cercle reste plein.
+ */
+export const waitRatio = (t: Ticket, wait: number) => {
+  if (wait <= 0) return 0;
+  if (!t.joinWait) return 1;
+  return Math.min(1, wait / t.joinWait);
+};
+
 /** Minutes de pause de l'agent comprises dans l'attente d'un ticket. */
 export const pauseMinutesBefore = (f: QueueFile, ticketId: string, now: number) => {
   let sum = 0;
@@ -387,7 +408,11 @@ function decideOvertime(s: SimState, f: QueueFile, t: Ticket, accept: boolean) {
     t.overtime = 'accepted';
     t.joinedAt = s.now;
     t.confirmedAt ??= s.now;
-    if (isMine(s, t)) notify(s, 'client', `${f.agentName} a accepté`, 'Tu as ta place dans la file. Patiente dans le salon.');
+    // Le ticket entre dans la file maintenant : son attente de départ part d'ici.
+    if (isMine(s, t)) {
+      t.joinWait = waitFor(f, t.id, s.now);
+      notify(s, 'client', `${f.agentName} a accepté`, 'Tu as ta place dans la file. Patiente dans le salon.');
+    }
   } else {
     t.overtime = 'refused';
     t.abortAt = s.now;
@@ -782,6 +807,7 @@ export function reducer(state: SimState, a: Action): SimState {
       // Le rappel n'a de sens que s'il tombe dans le futur.
       else if (wait > s.me.reminderMinutes) t.reminder = s.me.reminderMinutes;
       f.tickets.push(t);
+      if (t.overtime !== 'pending') t.joinWait = waitFor(f, t.id, s.now);
       s.me.ticketRef = { fileId: f.id, ticketId: t.id };
       s.clientNav = { screen: 'joined' };
       // Scénario client : l'inscription lance le temps, comme l'ouverture de file côté coiffeur.
@@ -820,6 +846,7 @@ export function reducer(state: SimState, a: Action): SimState {
       if (!t || a.prestationIds.length === 0) break;
       claimTicket(s, f, t, s.me.firstName ?? 'Toi', a.prestationIds);
       t.behavior = 'moi';
+      t.joinWait = waitFor(f, t.id, s.now);
       if (t.confirmedAt === undefined && waitFor(f, t.id, s.now) > s.me.reminderMinutes) t.reminder = s.me.reminderMinutes;
       s.me.walkIn = undefined;
       s.me.ticketRef = { fileId: f.id, ticketId: t.id };
