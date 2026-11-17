@@ -14,13 +14,13 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 
 **À versionner :**
 - le code (`src/`) et les fichiers statiques (`public/`, `index.html`) ;
-- la configuration : `package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig.json` ;
+- la configuration : `package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig.json`, `tsconfig.scripts.json` (types de `scripts/`, vérifiés par `npm run build`) ;
 - `CLAUDE.md`, `README.md`, `.claude/`, `.github/` et `handoffs/`.
 
 **Hors de git :**
 - les fichiers générés : `node_modules/`, `dist/`, `*.tsbuildinfo` ;
 - la configuration du poste : `.vscode/`, `.DS_Store` ;
-- `icon_exemple/` : images d'un tiers qui ont servi de modèle de style, inutiles au build.
+- `exemple/` : images d’un tiers qui ont servi de modèle de style (icônes, interface), inutiles au build.
 
 ## Arborescence
 
@@ -28,14 +28,27 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 .
 ├── .claude/
 │   ├── rules/                 # règles d'écriture et de git, reprises de QueueAPI
-│   └── skills/handoff/        # passation de contexte entre 2 sessions
+│   ├── agents/
+│   │   ├── browser-checker.md # vérifie l'affichage dans Chrome, à 360 et 1024 px
+│   │   ├── code-reviewer.md   # relit un changement et classe les défauts par gravité
+│   │   └── code-writer.md     # code un plan validé jusqu'à build et rejeu verts
+│   └── skills/
+│       ├── check-in-browser/  # lance browser-checker sur les écrans touchés
+│       ├── handoff/           # passation de contexte entre 2 sessions
+│       ├── review-code/       # lance code-reviewer et rend sa revue telle quelle
+│       ├── test-scenarios/    # rejeu des scénarios et explication des échecs
+│       ├── write-code/        # plan, code-writer, vérifications, revue et Chrome
+│       └── write-scenario/    # étapes validées avec Gabi, puis write-code
 ├── .github/workflows/
 │   └── deploy.yml             # build et publication sur GitHub Pages
 ├── handoffs/                  # fichiers de passation datés
 ├── public/
 │   ├── icon.svg               # icône de l'écran d'accueil
 │   └── manifest.webmanifest   # ouverture en plein écran sur téléphone
-├── icon_exemple/              # images qui ont servi de modèle de style aux icônes
+├── exemple/                   # images d’un tiers qui ont servi de modèle de style, hors git
+├── scripts/
+│   ├── replay.ts              # rejeu des 3 scénarios hors navigateur (npm run replay)
+│   └── viewport.html          # la maquette dans une iframe à largeur fixe, servie en dev seulement
 ├── src/
 │   ├── sim/
 │   │   ├── types.ts           # ticket, pause, file, comptes, état de la simulation
@@ -73,6 +86,8 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 npm run dev       # serveur accessible depuis un téléphone sur le même Wi-Fi
 npm run build     # vérifie les types et produit dist/
 npm run preview   # sert dist/ en local
+npm run replay    # rejoue les 3 scénarios dans 208 cas, signale les étapes bloquées ou sautées
+npm run replay -- --detail   # pareil, avec tous les cas de chaque étape sautée
 ```
 
 ## Règles
@@ -88,7 +103,8 @@ npm run preview   # sert dist/ en local
 
 - L'état est sauvegardé dans le `localStorage` du navigateur. Après un changement dans `src/sim/`, relancer un scénario par le menu ⋯, sinon l'ancien état reste affiché. Si la forme de l'état change, changer la clé `KEY` de `store.tsx`.
 - Chaque scénario montre 1 seul téléphone : celui du coiffeur dans les scénarios coiffeur (il pilote sa file avec son seul téléphone, décision de Gabi), celui du client dans le scénario client. Un geste d'un client dans un scénario coiffeur se simule par une arrivée du script, jamais par le téléphone client. À 900 px et plus, le téléphone s'affiche dans un cadre.
-- Un scénario est une suite d'étapes dans `src/sim/scenarios.ts`. Chaque étape finit quand sa condition `until` devient vraie. Une condition déjà vraie fait sauter l'étape : écris-la assez précise (un prénom, une heure).
+- Un scénario est une suite d'étapes dans `src/sim/scenarios.ts`. Chaque étape finit quand sa condition `until` devient vraie. Une condition déjà vraie fait sauter l'étape : écris-la assez précise (un prénom, une heure). `npm run replay` signale toute étape qui n'a jamais été affichée. Si le saut est voulu, marque l'étape `canSkip` en disant dans quel cas.
+- `scripts/replay.ts` reconnaît certaines étapes à leur texte (« Ta pause finit dans 5 min », « Léo veut un dégradé »…) pour savoir quel geste faire. Après un changement de texte d'une étape, une étape bloquée dans le rejeu vient souvent de là.
 - Les heures du scénario « ma journée » tiennent aux durées du catalogue et aux pauses par défaut. Après un changement dans `catalog.ts` ou `data.ts`, rejoue le scénario en entier.
 - Le dépôt est public : n'y mettre aucun secret, ni d'image d'un tiers.
 - Les polices viennent de Google Fonts : hors connexion, le navigateur affiche une police système.
