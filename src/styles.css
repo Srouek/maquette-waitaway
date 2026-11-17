@@ -60,7 +60,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 .clock { font: 700 18px var(--font-display); font-variant-numeric: tabular-nums; margin-left: auto; padding: 0 4px; }
 .demobtn {
-  flex: none; min-height: 36px; min-width: 38px; padding: 0 9px; white-space: nowrap;
+  flex: none; min-height: var(--tap); min-width: var(--tap); padding: 0 12px; white-space: nowrap;
   border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: transparent; color: var(--paper);
   font-size: 15px;
 }
@@ -357,7 +357,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 .guide-text { flex: 1 1 200px; min-width: 0; }
 .guide-jump {
-  flex: 1 1 auto; min-height: 40px; padding: 6px 16px; border: 0; border-radius: 999px;
+  flex: 1 1 auto; min-height: var(--tap); padding: 6px 16px; border: 0; border-radius: 999px;
   background: var(--brass-light); color: var(--ink); font-weight: 700; font-size: 15px;
 }
 @media (min-width: 900px) {
