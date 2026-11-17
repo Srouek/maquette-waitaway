@@ -37,6 +37,8 @@ const pauseCalled = (s: SimState, id: PauseId) => pauseHandled(s, id) || pause(s
 /** Le walk-in qui prend place dans la file et attend son tour (pas celui pris tout de suite à la place d'un retardataire). */
 const guest = (s: SimState) =>
   agentQueue(s).tickets.find((t) => t.walkIn && t.startedAt !== t.joinedAt && t.joinedAt < agentQueue(s).endOfDay - 40);
+/** Le walk-in pris à la place de Théo : `takePresentClient` le démarre à la minute même où Théo est retiré. */
+const takenForTheo = (s: SimState, removedAt: number) => agentQueue(s).tickets.find((t) => t.walkIn && t.startedAt === removedAt);
 /** Arrête le temps : l'agent a quelque chose à faire. */
 const stopClock = (s: SimState) => {
   s.playing = false;
@@ -138,7 +140,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       {
         text: 'Regarde les heures de la file : elles ont bougé avec ta décision.',
         jump: 'Aller à la fin de sa prestation',
-        until: (s) => ticket(s, 'Théo')?.abortAt !== undefined || ticket(s, 'Théo')?.startedAt !== undefined || s.lateAlert !== undefined,
+        // Théo retiré avec le walk-in : l'étape attend la fin du walk-in, sinon elle sauterait aussitôt.
+        until: (s) => {
+          const theo = ticket(s, 'Théo');
+          if (theo?.startedAt !== undefined || s.lateAlert !== undefined) return true;
+          if (theo?.abortAt === undefined) return false;
+          const taken = takenForTheo(s, theo.abortAt);
+          return !taken || taken.doneAt !== undefined;
+        },
       },
       {
         text: 'Théo n’est toujours pas là. Touche l’alerte et retire-le : les clients derrière lui avancent.',
