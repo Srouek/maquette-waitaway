@@ -19,13 +19,13 @@ export function PauseEditor({ pause, onChange }: { pause: PausePlan; onChange: (
   const midi = pause.id === 'midi';
   return (
     <li className={`pause-edit${pause.on ? '' : ' off'}`}>
-      <div className="pause-edit-head">
+      <button type="button" role="switch" aria-checked={pause.on} className="pause-edit-head switch-row" onClick={() => onChange({ ...pause, on: !pause.on })}>
         <span>
           <strong>{label}</strong>
           <span className="muted small">{midi ? `${fmtDuration(pause.minutes)}, ${fmtDuration(MIDI_MAX)} au plus` : fmtDuration(pause.minutes)}</span>
         </span>
-        <button type="button" role="switch" aria-checked={pause.on} aria-label={label} className="switch" onClick={() => onChange({ ...pause, on: !pause.on })} />
-      </div>
+        <span className="switch" aria-hidden />
+      </button>
       {pause.on && (
         <div className="pause-edit-body">
           <span className="muted small">Début souhaité</span>

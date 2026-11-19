@@ -1,6 +1,27 @@
-import { CATALOG } from './catalog';
-import { AGENT_FILE_ID, PAUSE_LABEL, STORE, mkTicket } from './data';
-import type { AgentEvent, ClientNav, DayPlan, Pause, PauseId, PausePlan, QueueFile, SimState, Ticket } from './types';
+import { CATALOG, GROUPS } from './catalog';
+import { AGENT_FILE_ID, DAYS, HISTORY_MONTH, PAUSE_LABEL, SETUP_STEPS, STORE, WEEK_HISTORY, FEATURED_PROPOSALS, defaultPauses, featuredPlanning, h, mkTicket } from './data';
+import type {
+  DistributionPoint,
+  AgentEvent,
+  ClientNav,
+  DayPlan,
+  Manager,
+  ManagerView,
+  OpeningDay,
+  OpeningRange,
+  Pause,
+  PauseId,
+  PausePlan,
+  PlannedDay,
+  Prestation,
+  Proposal,
+  QueueFile,
+  SetupStatus,
+  SetupStepId,
+  SimState,
+  TeamMember,
+  Ticket,
+} from './types';
 
 // ---------- Sélecteurs ----------
 
@@ -224,6 +245,501 @@ export function myTicket(s: SimState): { file: QueueFile; ticket: Ticket } | und
 /** Le plan du jour simulé dans la semaine type de l'agent. */
 export const todayPlan = (s: SimState): DayPlan => s.agent.week[s.weekday];
 
+// ---------- Gérant ----------
+
+/**
+ * Étape de configuration à faire maintenant : la 1re qui n'est pas faite, ou la 1re de toutes si la configuration
+ * n'a pas commencé. Absente : les 6 étapes sont faites.
+ */
+export const currentSetupStep = (m: Manager): SetupStepId | undefined =>
+  SETUP_STEPS.find((x) => !m.setupDone?.includes(x.id))?.id;
+
+/** Une étape enregistrée est faite, l'étape en cours est la 1re qui ne l'est pas, les autres sont à faire. */
+export function setupStatus(m: Manager, id: SetupStepId): SetupStatus {
+  if (m.setupDone === undefined) return 'todo';
+  if (m.setupDone.includes(id)) return 'done';
+  return currentSetupStep(m) === id ? 'doing' : 'todo';
+}
+
+/** La configuration est finie : les 6 étapes sont faites. Le menu (tableau de bord, équipe, plannings, salon) remplace alors les étapes. */
+export const setupFinished = (m: Manager) => m.setupDone !== undefined && currentSetupStep(m) === undefined;
+
+/**
+ * Le coiffeur invité du scénario gérant : le 1er membre de l'équipe, dans l'ordre d'invitation, quels que soient son
+ * prénom et son e-mail. C'est lui qui accepte son invitation et envoie son planning au saut « 1 semaine plus tard ».
+ * Absent sans invitation, ou si elles ont toutes été annulées avant le saut.
+ */
+export const featuredMember = (m: Manager): TeamMember | undefined => m.team[0];
+
+/** Les prestations proposées par l'équipe que le gérant n'a encore ni validées ni refusées, dans l'ordre d'arrivée. */
+export const pendingProposals = (m: Manager): Proposal[] => (m.proposals ?? []).filter((p) => p.state === 'en-attente');
+
+/**
+ * La prestation qu'une proposition de l'équipe devient une fois validée : une prestation créée, avec l'id de la
+ * proposition, sa durée et sans description. Partagée par le reducer (`managerAcceptProposal`) et l'écran Prestations.
+ */
+export const proposalToPrestation = (p: Proposal): Prestation => ({ id: p.id, label: p.label, group: p.group, minutes: p.minutes, description: '' });
+
+/** Chiffres d'1 coiffeur ou d'1 jour du tableau de bord. `wait` : attente moyenne en minutes, absente sans client servi. */
+export type DashboardFigures = { served: number; wait?: number };
+
+export type Dashboard = DashboardFigures & {
+  /** « Du lundi 16 au dimanche 22 novembre ». */
+  period: string;
+  /** Les 7 jours, dans l'ordre. Un jour fermé n'a pas de chiffres. */
+  days: (DashboardFigures & { day: number; date: number; closed: boolean })[];
+  /** Les coiffeurs qui ont des chiffres dans l'historique : le gérant d'abord, puis les membres dans l'ordre de l'équipe. */
+  agents: (DashboardFigures & { who: string; name: string })[];
+  /** « 6 tickets clôturés sur incident mardi ne sont pas comptés. » Absent sans incident. */
+  incidents?: string;
+};
+
+type Entry = NonNullable<Manager['history']>[number]['entries'][number];
+
+/** Clients servis et attente moyenne de ces lignes, arrondie à la minute. Les tickets clôturés sur incident n'y sont pas. */
+function figures(entries: Entry[]): DashboardFigures {
+  const served = entries.reduce((n, e) => n + e.served, 0);
+  const wait = entries.reduce((n, e) => n + e.waitMinutes, 0);
+  return served === 0 ? { served } : { served, wait: Math.round(wait / served) };
+}
+
+/**
+ * Le tableau de bord du gérant (E3-5) : attente moyenne du salon et de chaque coiffeur sur les 7 derniers jours, sans
+ * les tickets clôturés sur incident. Absent tant que l'historique n'existe pas (avant le saut « 1 semaine plus tard »).
+ * Un jour est fermé d'après les heures d'ouverture actuelles (`Manager.hours`) : ses lignes ne comptent pas, pour que
+ * le graphique et les totaux disent la même chose si les heures ont changé après le saut.
+ * Hors backlog : E3-5 ne parle que de l'attente. Le nombre de clients servis est ajouté (plan validé par Gabi).
+ * Aucune note d'avis : pendant le pilote, personne ne voit les notes.
+ */
+export function dashboard(m: Manager): Dashboard | undefined {
+  const history = m.history;
+  if (!history || history.length === 0) return undefined;
+  const open = history.filter((d) => m.hours[d.day].open);
+  const all = open.flatMap((d) => d.entries);
+  const nameOf = (who: string) => (who === MANAGER_WHO ? m.firstName : m.team.find((x) => x.id === who)?.firstName);
+  // Un coiffeur compte dès qu'il a des chiffres dans l'historique, le gérant compris, même s'il a coupé « Je coiffe
+  // aussi » depuis : les chiffres passés ne changent pas quand un planning change. Les totaux, les barres et les
+  // incidents portent sur les coiffeurs listés.
+  const whos = [MANAGER_WHO, ...m.team.map((x) => x.id)].filter((id) => all.some((e) => e.who === id));
+  const shown = (es: Entry[]) => es.filter((e) => whos.includes(e.who));
+  const entries = shown(all);
+  const incidentDays = open.filter((d) => shown(d.entries).some((e) => e.incidents > 0));
+  const incidents = incidentDays.reduce((n, d) => n + shown(d.entries).reduce((k, e) => k + e.incidents, 0), 0);
+  const first = history[0];
+  const last = history[history.length - 1];
+  return {
+    ...figures(entries),
+    period: `Du ${DAYS[first.day].toLowerCase()} ${first.date} au ${DAYS[last.day].toLowerCase()} ${last.date} ${HISTORY_MONTH}`,
+    days: history.map((d) => {
+      const closed = !m.hours[d.day].open;
+      return { day: d.day, date: d.date, closed, ...(closed ? { served: 0 } : figures(shown(d.entries))) };
+    }),
+    agents: whos.map((who) => ({ who, name: nameOf(who) ?? '', ...figures(entries.filter((e) => e.who === who)) })),
+    incidents:
+      incidents === 0
+        ? undefined
+        : `${incidents} ${incidents > 1 ? 'tickets clôturés' : 'ticket clôturé'} sur incident ${incidentDays.map((d) => DAYS[d.day].toLowerCase()).join(' et ')} ${incidents > 1 ? 'ne sont pas comptés' : 'n’est pas compté'}.`,
+  };
+}
+
+/** Le point de distribution suivant, nommé d'après son rang : « Poste 1 », « Poste 2 »… */
+export const nextPoint = (points: DistributionPoint[]): DistributionPoint => ({
+  id: `point-${points.length + 1}`,
+  name: `Poste ${points.length + 1}`,
+});
+
+/** Les points de distribution créés d'après l'abonnement : 1 par file. */
+export function pointsFor(files: number): DistributionPoint[] {
+  const out: DistributionPoint[] = [];
+  while (out.length < files) out.push(nextPoint(out));
+  return out;
+}
+
+const filesText = (n: number) => `${n} ${n > 1 ? 'files' : 'file'}`;
+
+/**
+ * Ce qui empêche d'enregistrer les postes : plus de postes que de files, un nom vide, ou 2 postes du même nom.
+ * 2 noms sont les mêmes sans tenir compte de la casse ni des espaces autour.
+ */
+export function pointsError(points: Pick<DistributionPoint, 'name'>[], files: number): string | undefined {
+  if (points.length === 0) return 'Il faut au moins 1 poste.';
+  if (points.length > files) return `Ton abonnement compte ${filesText(files)} : ${files} ${files > 1 ? 'postes' : 'poste'} au plus.`;
+  if (points.some((p) => p.name.trim() === '')) return 'Donne un nom à chaque poste.';
+  const seen = new Set<string>();
+  for (const p of points) {
+    const k = p.name.trim().toLowerCase();
+    if (seen.has(k)) return `2 postes s’appellent «\u00a0${p.name.trim()}\u00a0». Donne-leur des noms différents.`;
+    seen.add(k);
+  }
+  return undefined;
+}
+
+/** Texte du panneau quand le gérant veut 1 poste de plus que de files : « Ton abonnement compte 1 file. Pour un 2e poste… » */
+export const pointsLimitText = (files: number) =>
+  `Ton abonnement compte ${filesText(files)}. Pour un ${files + 1}e poste, ajoute une file sur le site.`;
+
+/** Message affiché après l'achat simulé d'1 file. */
+export const fileBoughtText = (files: number) =>
+  `Simulation : tu viens d’acheter 1 file de plus. Ton abonnement compte maintenant ${filesText(files)}.`;
+
+/**
+ * L'étape `id` est enregistrée : elle passe à « fait », et la 1re étape pas encore faite passe en cours. Une étape
+ * rouverte après coup ne touche pas aux autres. L'écran de l'étape suivante dans `SETUP_STEPS` s'ouvre aussitôt,
+ * même quand le gérant corrige une étape déjà faite pendant la configuration. Après la dernière étape (QR codes), la page de configuration
+ * revient : quand les 6 sont faites, aucune n'est en cours et la configuration est finie.
+ * Cas particulier : si l'étape suivante est encore à faire (une étape plus tôt est repassée en cours après l'achat
+ * d'1 file), c'est l'étape en cours qui s'ouvre, car l'écran d'une étape à faire refuse d'enregistrer.
+ * Une fois la configuration finie, rien ne s'enchaîne : Équipe, ouverte depuis le menu, reste affichée, Ton planning
+ * ouvert depuis Plannings y revient, Prestations ouvert depuis « À traiter » revient au tableau de bord, et les autres
+ * étapes, rouvertes depuis Mon salon, y reviennent.
+ */
+function finishSetupStep(m: Manager, id: SetupStepId) {
+  if (!m.setupDone) return;
+  if (setupFinished(m)) {
+    // Ton planning ouvert depuis Plannings y revient après l'enregistrement, comme avec Retour, et Prestations
+    // ouvert depuis « À traiter » revient au tableau de bord.
+    if (m.from !== undefined) m.view = m.from;
+    else if (id === 'equipe') m.view = 'equipe';
+    else delete m.view;
+    delete m.from;
+    return;
+  }
+  if (!m.setupDone.includes(id)) m.setupDone.push(id);
+  const next = SETUP_STEPS[SETUP_STEPS.findIndex((x) => x.id === id) + 1]?.id;
+  if (next === undefined) delete m.view;
+  else m.view = setupStatus(m, next) === 'todo' ? currentSetupStep(m) : next;
+}
+
+/** Id de l'affiche du QR Boutique dans `Manager.printed`. Celle de chaque QR File/Station a l'id de son poste. */
+export const BOUTIQUE_POSTER = 'boutique';
+
+/** 1 affiche de QR code à imprimer : `title` en gros sur l'affiche, `text` pour dire au client quoi faire. */
+export type QrPoster = { id: string; title: string; text: string };
+
+/**
+ * Les affiches du Store (E3-3) : le QR Boutique, à l'entrée, puis 1 QR File/Station par poste, dans l'ordre des postes.
+ * L'affiche d'un poste garde son id quand le poste est renommé : son QR code ne change pas.
+ * Écart au backlog : le QR code affiché est factice (`QrFake`), sans lien avec une vraie file.
+ */
+export const qrPosters = (m: Pick<Manager, 'store' | 'points'>): QrPoster[] => [
+  { id: BOUTIQUE_POSTER, title: m.store.name, text: 'Scanne pour t’inscrire dans la file, puis à ton retour pour confirmer ta présence.' },
+  ...m.points.map((p) => ({ id: p.id, title: p.name, text: 'Scanne en arrivant au fauteuil pour démarrer ta prestation' })),
+];
+
+/** Ce qui empêche d'enregistrer les heures d'1 jour : une plage qui finit avant de commencer, ou 2 plages qui se chevauchent. */
+export function openingDayError(d: OpeningDay): string | undefined {
+  if (!d.open) return undefined;
+  if (d.ranges.some((r) => r.end <= r.start)) return 'La fermeture doit venir après l’ouverture.';
+  const [a, b] = d.ranges;
+  if (b && a.start < b.end && b.start < a.end) return 'Les 2 plages se chevauchent.';
+  return undefined;
+}
+
+/** 1re erreur de la semaine, précédée du jour. Sans erreur, les heures peuvent être enregistrées. */
+export function openingHoursError(hours: OpeningDay[]): string | undefined {
+  for (const d of hours) {
+    const e = openingDayError(d);
+    if (e) return `${DAYS[d.day]} : ${e.charAt(0).toLowerCase()}${e.slice(1)}`;
+  }
+  return undefined;
+}
+
+/**
+ * Les 2 plages proposées quand le gérant ajoute une 2e plage à 1 jour, rangées dans l'ordre de la journée.
+ * Jamais de chevauchement avec la 1re plage `a` :
+ * - `a` couvre 12h30 à 14h00 : la journée est coupée là ;
+ * - sinon 1 h après `a`, pour 1 h, si elle commence au plus tard à 21h00 (fin bornée à 22h00) ;
+ * - sinon 1 h avant `a`, pour 1 h, si elle finit au plus tôt à 7h00 (début borné à 6h00, comme la roulette) ;
+ * - sinon aucune : `undefined`, le jour garde 1 seule plage.
+ */
+export function secondOpeningRange(a: OpeningRange): OpeningRange[] | undefined {
+  const noon = h(12, 30);
+  const back = h(14);
+  if (a.start < noon && a.end > back)
+    return [
+      { start: a.start, end: noon },
+      { start: back, end: a.end },
+    ];
+  if (a.end + 60 <= h(21)) return [a, { start: a.end + 60, end: Math.min(a.end + 120, h(22)) }];
+  if (a.start - 60 >= h(7)) return [{ start: Math.max(a.start - 120, h(6)), end: a.start - 60 }, a];
+  return undefined;
+}
+
+/** Reprend les plages d'1 jour sur les autres jours ouverts. Les jours fermés ne changent pas. */
+export function copyOpeningRanges(hours: OpeningDay[], day: number): OpeningDay[] {
+  const from = hours[day];
+  return hours.map((d) => (d.day !== day && d.open ? { ...d, ranges: from.ranges.map((r) => ({ ...r })) } : d));
+}
+
+/** Bornes d'une durée de prestation, en minutes : celles de la roulette des durées (`DurationWheel` de `ui/kit.tsx`). */
+export const PRESTATION_MINUTES = { min: 5, max: 120, step: 5 };
+
+const validMinutes = (n: number) =>
+  Number.isInteger(n) && n >= PRESTATION_MINUTES.min && n <= PRESTATION_MINUTES.max && n % PRESTATION_MINUTES.step === 0;
+
+/** 2 noms de prestation sont les mêmes sans tenir compte de la casse ni des espaces autour. */
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Prestation que le gérant crée, avant qu'elle reçoive son id. */
+export type PrestationDraft = Pick<Prestation, 'label' | 'group' | 'minutes' | 'description'>;
+
+/**
+ * Ce qui empêche de créer une prestation : un nom vide, un nom déjà pris dans le catalogue WaitAway ou par une
+ * prestation déjà créée, ou une durée hors de la roulette.
+ */
+export function newPrestationError(d: Pick<PrestationDraft, 'label' | 'minutes'>, created: Prestation[]): string | undefined {
+  const label = d.label.trim();
+  if (label === '') return 'Donne un nom à la prestation.';
+  if ([...CATALOG, ...created].some((p) => sameName(p.label, label)))
+    return `« ${label} » est déjà dans la liste. Coche-la plutôt.`;
+  if (!validMinutes(d.minutes)) return `La durée va de ${PRESTATION_MINUTES.min} à ${PRESTATION_MINUTES.max} min.`;
+  return undefined;
+}
+
+/**
+ * Ce qui empêche de valider une proposition de l'équipe, d'après la liste `created` (celle de l'écran, ou celle
+ * enregistrée pour le reducer) : son nom est déjà pris, ou une autre erreur de `newPrestationError`.
+ */
+export function proposalError(p: Proposal, created: Prestation[]): string | undefined {
+  if ([...CATALOG, ...created].some((x) => x.id !== p.id && sameName(x.label, p.label.trim()))) return 'Déjà dans ton catalogue : refuse-la.';
+  return newPrestationError(p, created.filter((x) => x.id !== p.id));
+}
+
+/** La prestation créée, avec un id qui ne prend pas celui d'une autre. Nom et description sans les espaces autour. */
+export function createPrestation(d: PrestationDraft, created: Prestation[]): Prestation {
+  let n = created.length + 1;
+  while (created.some((p) => p.id === `perso-${n}`)) n++;
+  return { id: `perso-${n}`, label: d.label.trim(), group: d.group, minutes: d.minutes, description: d.description.trim() };
+}
+
+/** Ce qui empêche d'enregistrer le catalogue du Store : aucune prestation, ou 2 prestations du même nom. */
+export function storePrestationsError(list: Pick<Prestation, 'label'>[]): string | undefined {
+  if (list.length === 0) return 'Coche au moins 1 prestation.';
+  for (let i = 0; i < list.length; i++)
+    if (list.slice(0, i).some((p) => sameName(p.label, list[i].label)))
+      return `2 prestations s’appellent « ${list[i].label.trim()} ». Garde-n’en qu’une.`;
+  return undefined;
+}
+
+/**
+ * Les prestations retenues, dans l'ordre du catalogue WaitAway puis des prestations créées, chacune avec sa durée
+ * indicative. `minutes` : la durée par id de prestation retenue.
+ */
+export function storePrestations(created: Prestation[], minutes: Record<string, number>): Prestation[] {
+  return [...CATALOG, ...created].filter((p) => p.id in minutes).map((p) => ({ ...p, minutes: minutes[p.id] }));
+}
+
+/**
+ * Bornes du volume horaire hebdomadaire d'un salarié, en heures, et pas du Stepper. Un planning qui le dépasse donne
+ * un avertissement sur l'écran Plannings (`volumeWarning`, E6-13).
+ */
+export const TEAM_HOURS = { min: 1, max: 48, step: 1, default: 35 };
+
+/** Même règle que les autres formulaires de la maquette : quelque chose, une arobase, quelque chose, un point, quelque chose. */
+const validEmail = (email: string) => /^\S+@\S+\.\S+$/.test(email.trim());
+
+/** 2 e-mails sont les mêmes sans tenir compte de la casse ni des espaces autour. */
+const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Invitation que le gérant prépare, avant qu'elle reçoive son id. */
+export type InviteDraft = Pick<TeamMember, 'firstName' | 'email' | 'role' | 'status' | 'hours'>;
+
+/** Une erreur d'invitation et le champ qu'elle concerne, pour ne l'afficher qu'une fois ce champ rempli. */
+export type InviteError = { field: 'firstName' | 'email' | 'hours'; text: string };
+
+/**
+ * Ce qui empêche d'envoyer une invitation : un prénom vide, un e-mail invalide, un e-mail déjà dans l'équipe (celui
+ * du gérant compris), ou le volume horaire d'un salarié hors des bornes.
+ */
+export function inviteError(d: InviteDraft, m: Pick<Manager, 'email' | 'team'>): InviteError | undefined {
+  if (d.firstName.trim() === '') return { field: 'firstName', text: 'Donne le prénom de la personne à inviter.' };
+  if (!validEmail(d.email)) return { field: 'email', text: 'Cette adresse e-mail n’est pas valide.' };
+  if (sameEmail(d.email, m.email) || m.team.some((x) => sameEmail(x.email, d.email)))
+    return { field: 'email', text: `${d.email.trim().toLowerCase()} est déjà dans ton équipe.` };
+  if (d.status === 'salarie') {
+    const n = d.hours;
+    if (n === undefined || !Number.isInteger(n) || n < TEAM_HOURS.min || n > TEAM_HOURS.max)
+      return { field: 'hours', text: `Le volume horaire va de ${TEAM_HOURS.min} à ${TEAM_HOURS.max} h.` };
+  }
+  return undefined;
+}
+
+/** Le gérant ne peut pas prendre l'e-mail d'une personne qu'il a invitée. */
+export function managerEmailError(email: string, m: Pick<Manager, 'team'>): string | undefined {
+  const x = m.team.find((t) => sameEmail(t.email, email));
+  return x ? `${email.trim().toLowerCase()} est déjà l’adresse de ${x.firstName}, dans ton équipe.` : undefined;
+}
+
+/**
+ * Lien d'inscription fictif d'une invitation.
+ * Écart au backlog : le lien n'est pas à usage unique (E3-2). Dans la démo, il ne mène nulle part.
+ */
+export const inviteLink = (x: Pick<TeamMember, 'id'>) => `https://waitaway.app/invitation/${x.id}`;
+
+/** Statut d'un membre, tel qu'affiché : « Salarié, 35 h » ou « Indépendant ». */
+export const teamStatusText = (x: Pick<TeamMember, 'status' | 'hours'>) =>
+  x.status === 'salarie' ? `Salarié, ${x.hours} h` : 'Indépendant';
+
+/** Amplitude d'1 jour d'ouverture : du début de sa 1re plage à la fin de sa dernière. */
+export const openingSpan = (d: OpeningDay): OpeningRange => ({ start: d.ranges[0].start, end: d.ranges[d.ranges.length - 1].end });
+
+/**
+ * Planning proposé au gérant quand il ouvre l'étape Ton planning : les jours où le salon est ouvert sont travaillés,
+ * sur toute l'amplitude du jour, avec les pauses par défaut du coiffeur, au 1er poste. Calculé d'après les heures
+ * d'ouverture enregistrées à ce moment-là, pas dans l'état de départ.
+ */
+export const defaultPlanning = (m: Pick<Manager, 'hours' | 'points'>): PlannedDay[] =>
+  m.hours.map((d) => ({ day: d.day, works: d.open, ...openingSpan(d), pauses: defaultPauses(), point: m.points[0]?.id }));
+
+/**
+ * Ce qui empêche d'enregistrer 1 jour du planning du gérant : un jour travaillé alors que le salon est fermé, une fin
+ * avant le début, un horaire hors des heures d'ouverture du jour, ou un poste qui n'est pas dans le salon.
+ * Règle choisie pour un jour à 2 plages : le travail tient dans l'amplitude du jour (`openingSpan`), la fermeture du
+ * midi n'est pas vérifiée. Le gérant y met sa pause de midi s'il le veut.
+ */
+export function planningDayError(d: PlannedDay, m: Pick<Manager, 'hours' | 'points'>): string | undefined {
+  if (!d.works) return undefined;
+  const open = m.hours[d.day];
+  if (!open?.open) return 'Le salon est fermé ce jour.';
+  if (d.end <= d.start) return 'L’heure de fin doit venir après l’heure de début.';
+  const span = openingSpan(open);
+  if (d.start < span.start || d.end > span.end) return `Le salon est ouvert de ${fmt(span.start)} à ${fmt(span.end)} ce jour.`;
+  if (!m.points.some((p) => p.id === d.point)) return 'Choisis un de tes postes.';
+  return undefined;
+}
+
+/**
+ * 1re erreur du planning du gérant, précédée du jour. Le gérant qui ne coiffe pas n'a pas de planning : rien à
+ * vérifier. Sinon le planning compte les 7 jours, du lundi au dimanche.
+ */
+export function planningError(cuts: boolean, planning: PlannedDay[] | undefined, m: Pick<Manager, 'hours' | 'points'>): string | undefined {
+  if (!cuts) return undefined;
+  if (!planning || planning.length !== 7 || planning.some((d, i) => d.day !== i)) return 'Le planning doit compter les 7 jours de la semaine.';
+  for (const d of planning) {
+    const e = planningDayError(d, m);
+    if (e) return `${DAYS[d.day]} : ${e.charAt(0).toLowerCase()}${e.slice(1)}`;
+  }
+  return undefined;
+}
+
+/**
+ * Heures prévues sur la semaine : le temps des jours travaillés, moins les pauses actives. Une pause ne compte que
+ * pour la part qui tombe dans les heures de travail du jour. Servira aussi au volume horaire d'un salarié (E6-13).
+ */
+export function weekHours(planning: DayPlan[]): number {
+  let minutes = 0;
+  for (const d of planning) {
+    if (!d.works || d.end <= d.start) continue;
+    minutes += d.end - d.start;
+    for (const p of d.pauses) if (p.on) minutes -= Math.max(0, Math.min(p.at + p.minutes, d.end) - Math.max(p.at, d.start));
+  }
+  return minutes / 60;
+}
+
+/** Total affiché sous le planning : « 38 h prévues cette semaine », « 41 h 30 prévues cette semaine ». */
+export function weekHoursText(hours: number): string {
+  const minutes = Math.round(hours * 60);
+  return `${minutes === 0 ? '0 h' : fmtDuration(minutes)} ${minutes < 120 ? 'prévue' : 'prévues'} cette semaine`;
+}
+
+/** Le gérant dans les chevauchements de plannings : `who` vaut `gerant`, comme dans l'historique du tableau de bord. */
+export const MANAGER_WHO = 'gerant';
+
+/** 2 coiffeurs sur le même poste, le même jour, en même temps : `a` et `b` sont des `who` (`gerant` ou `TeamMember.id`). */
+export type PlanningOverlap = { day: number; a: string; b: string; point: string; start: number; end: number };
+
+/**
+ * Les chevauchements de plannings du salon (E6-15) : 2 coiffeurs sur le même poste, le même jour, avec des horaires
+ * qui se chevauchent. Le gérant compte s'il coiffe, et chaque membre qui a un planning. Un relais sans chevauchement
+ * passe (9h00 à 13h00, puis 14h00 à 19h00). `draft` remplace le planning d'1 coiffeur (`MANAGER_WHO` pour le gérant,
+ * qui coiffe alors), pour vérifier l'écran en cours.
+ * Règle choisie, la plus simple : les pauses n'annulent pas un chevauchement. 2 coiffeurs sur le même poste de 9h00
+ * à 18h00 se chevauchent, même si l'un est en pause quand l'autre travaille.
+ */
+export function planningOverlaps(m: Manager, draft?: { id: string; planning: PlannedDay[] }): PlanningOverlap[] {
+  const plannings: { who: string; planning: PlannedDay[] }[] = [];
+  if (draft?.id === MANAGER_WHO) plannings.push({ who: MANAGER_WHO, planning: draft.planning });
+  else if (m.cuts && m.planning) plannings.push({ who: MANAGER_WHO, planning: m.planning });
+  for (const x of m.team) {
+    const planning = draft?.id === x.id ? draft.planning : x.planning;
+    if (!x.invited && planning) plannings.push({ who: x.id, planning });
+  }
+  const out: PlanningOverlap[] = [];
+  for (let day = 0; day < 7; day++) {
+    const days = plannings
+      .map((p) => ({ who: p.who, d: p.planning[day] }))
+      .filter((x) => x.d?.works && x.d.point !== undefined && x.d.end > x.d.start);
+    for (let i = 0; i < days.length; i++)
+      for (let j = i + 1; j < days.length; j++) {
+        const x = days[i];
+        const y = days[j];
+        const start = Math.max(x.d.start, y.d.start);
+        const end = Math.min(x.d.end, y.d.end);
+        if (x.d.point === y.d.point && start < end) out.push({ day, a: x.who, b: y.who, point: x.d.point!, start, end });
+      }
+  }
+  return out;
+}
+
+/**
+ * Message d'un chevauchement : « Le samedi, Antoine et toi êtes sur Fauteuil vitrine de 09:00 à 18:00 : 1 seul
+ * coiffeur à la fois sur un poste. » Le gérant est « toi », toujours nommé en dernier.
+ */
+export function overlapText(o: PlanningOverlap, m: Manager): string {
+  const [x, y] = o.a === MANAGER_WHO ? [o.b, o.a] : [o.a, o.b];
+  const name = (who: string) => m.team.find((t) => t.id === who)?.firstName ?? '';
+  const who = y === MANAGER_WHO ? `${name(x)} et toi êtes` : `${name(x)} et ${name(y)} sont`;
+  const point = m.points.find((p) => p.id === o.point)?.name ?? 'le même poste';
+  return `Le ${DAYS[o.day].toLowerCase()}, ${who} sur ${point} de ${fmt(o.start)} à ${fmt(o.end)} : 1 seul coiffeur à la fois sur un poste.`;
+}
+
+/** 1er chevauchement du planning `planning` du coiffeur `who` (`MANAGER_WHO` ou `TeamMember.id`) avec un autre coiffeur. */
+function overlapError(m: Manager, who: string, planning: PlannedDay[]): string | undefined {
+  const o = planningOverlaps(m, { id: who, planning }).find((x) => x.a === who || x.b === who);
+  return o ? overlapText(o, m) : undefined;
+}
+
+/**
+ * Ce qui empêche d'enregistrer ou de figer le planning d'1 membre : une erreur de jour (mêmes règles que le planning du
+ * gérant, `planningError`), ou un chevauchement avec un autre coiffeur du salon, gérant compris.
+ */
+export function memberPlanningError(m: Manager, id: string, planning: PlannedDay[]): string | undefined {
+  return planningError(true, planning, m) ?? overlapError(m, id, planning);
+}
+
+/**
+ * Ce qui empêche d'enregistrer le planning du gérant (Ton planning) : une erreur de jour (`planningError`), ou un
+ * chevauchement avec un membre de l'équipe (E6-15), même message que pour un membre. Le gérant qui ne coiffe pas n'a
+ * rien à vérifier.
+ */
+export function managerPlanningError(m: Manager, cuts: boolean, planning: PlannedDay[] | undefined): string | undefined {
+  const e = planningError(cuts, planning, m);
+  if (e || !cuts || !planning) return e;
+  return overlapError(m, MANAGER_WHO, planning);
+}
+
+/**
+ * Avertissement non bloquant quand le planning d'un salarié dépasse son volume horaire (E6-13) : « 37 h 30 prévues
+ * pour 35 h ». Rien pour un indépendant, ni sans planning. `planning` : celui de l'écran en cours, sinon celui du membre.
+ * Écart au backlog : pas d'avertissement pour le gérant qui coiffe, il n'a pas de volume horaire dans la maquette.
+ */
+export function volumeWarning(x: Pick<TeamMember, 'status' | 'hours' | 'planning'>, planning = x.planning): string | undefined {
+  if (x.status !== 'salarie' || x.hours === undefined || !planning) return undefined;
+  const minutes = Math.round(weekHours(planning) * 60);
+  if (minutes <= x.hours * 60) return undefined;
+  return `${fmtDuration(minutes)} ${minutes < 120 ? 'prévue' : 'prévues'} pour ${x.hours} h`;
+}
+
+/** Heures prévues d'un salarié par rapport à son volume horaire : « 16 h sur 35 h ». Rien pour un indépendant. */
+export function volumeText(x: Pick<TeamMember, 'status' | 'hours' | 'planning'>, planning = x.planning): string | undefined {
+  if (x.status !== 'salarie' || x.hours === undefined || !planning) return undefined;
+  const minutes = Math.round(weekHours(planning) * 60);
+  return `${minutes === 0 ? '0 h' : fmtDuration(minutes)} sur ${x.hours} h`;
+}
+
+/** Le membre dont le planning peut s'ouvrir chez le gérant : inscrit (invitation acceptée) et avec un planning. */
+const memberWithPlanning = (m: Manager, id: string | undefined) => m.team.find((x) => x.id === id && !x.invited && x.planning !== undefined);
+
 /**
  * Ce que fait le bouton Scan du client. Dans la vraie application, c'est le QR code scanné qui décide.
  * La maquette n'a pas de caméra : elle choisit le QR code attendu selon l'état du ticket.
@@ -349,7 +865,40 @@ export type Action =
   | { type: 'agentConfirm'; ticketId: string }
   | { type: 'walkIn'; minutes: number; startNow?: boolean; rejectLate?: boolean }
   | { type: 'closeFile'; current?: 'terminer' | 'rejeter' }
-  | { type: 'dropNotif'; id: number };
+  | { type: 'dropNotif'; id: number }
+  | { type: 'managerEdit'; account?: { firstName: string; lastName: string; email: string }; store?: { name: string; address: string } }
+  | { type: 'managerStartSetup' }
+  /**
+   * Ouvre l'écran d'une étape ou d'une entrée du menu. Sans `step` : la page de configuration. `member` : pour
+   * `member-planning`. `from` : l'écran d'où il est ouvert, quand Retour doit y ramener (`Manager.from`).
+   */
+  | { type: 'managerOpen'; step?: ManagerView; member?: string; from?: 'plannings' | 'dashboard' }
+  | { type: 'managerSaveHours'; hours: OpeningDay[] }
+  /** Les noms des postes, par id de poste. Un poste absent garde son nom. */
+  | { type: 'managerSavePoints'; names: Record<string, string> }
+  | { type: 'managerBuyFile' }
+  /** Les prestations créées par le gérant, et la durée indicative de chaque prestation retenue, par id. */
+  | { type: 'managerSavePrestations'; created: Prestation[]; minutes: Record<string, number> }
+  /** Le gérant valide une prestation proposée par l'équipe (`Proposal.id`). */
+  | { type: 'managerAcceptProposal'; id: string }
+  /** Le gérant refuse une prestation proposée par l'équipe, avec un message facultatif. */
+  | { type: 'managerRejectProposal'; id: string; message?: string }
+  | { type: 'managerInvite'; invite: InviteDraft }
+  | { type: 'managerCancelInvite'; id: string }
+  | { type: 'managerSaveTeam' }
+  /** Le gérant coiffe aussi ou non, et son planning des 7 jours quand il coiffe. */
+  | { type: 'managerSavePlanning'; cuts: boolean; planning?: PlannedDay[] }
+  /** L'affiche `id` de `qrPosters`. Sans `id` : toutes les affiches. */
+  | { type: 'managerPrint'; id?: string }
+  | { type: 'managerFinishSetup' }
+  /** Saut « 1 semaine plus tard » du scénario gérant : le coiffeur invité accepte son invitation et l'historique apparaît. */
+  | { type: 'managerWeekLater' }
+  /** Le planning des 7 jours d'1 membre, corrigé par le gérant. */
+  | { type: 'managerSaveMemberPlanning'; id: string; planning: PlannedDay[] }
+  /** Fige le planning d'1 membre, après avoir enregistré `planning`, celui de l'écran. */
+  | { type: 'managerFreezePlanning'; id: string; planning: PlannedDay[] }
+  /** Rouvre un planning figé, pour que le membre le modifie. */
+  | { type: 'managerReopenPlanning'; id: string };
 
 function notify(s: SimState, to: 'client' | 'agent', title: string, body: string) {
   s.notifs.push({ id: s.nextId++, to, title, body });
@@ -897,6 +1446,266 @@ export function reducer(state: SimState, a: Action): SimState {
     case 'agentDay':
       s.agent.week[a.plan.day] = a.plan;
       break;
+    // Le gérant corrige les infos saisies à l'achat. L'abonnement ne se change que sur le site de WaitAway.
+    case 'managerEdit':
+      if (!s.manager) break;
+      if (a.account) {
+        if (managerEmailError(a.account.email, s.manager) !== undefined) break;
+        Object.assign(s.manager, { ...a.account, email: a.account.email.trim().toLowerCase() });
+      }
+      if (a.store) s.manager.store = { ...a.store };
+      break;
+    // La configuration commence par l'écran de sa 1re étape.
+    case 'managerStartSetup':
+      if (s.manager && s.manager.setupDone === undefined) {
+        s.manager.setupDone = [];
+        s.manager.view = SETUP_STEPS[0].id;
+      }
+      break;
+    // Ouvre l'écran d'une étape en cours ou faite. Sans étape : retour à la page de configuration. Le tableau de bord
+    // ne s'ouvre qu'une fois la configuration finie.
+    // Les plannings de l'équipe aussi, et le planning d'1 membre inscrit qui en a un.
+    // `from` n'est gardé, une fois la configuration finie, que pour Ton planning ouvert depuis Plannings, et pour
+    // Prestations et le planning d'1 membre ouverts depuis le tableau de bord (« À traiter ») : tout autre écran
+    // ouvert l'efface.
+    case 'managerOpen': {
+      const m = s.manager;
+      if (!m) break;
+      if (a.step === undefined) delete m.view;
+      else if (a.step === 'dashboard' || a.step === 'plannings') {
+        if (setupFinished(m)) m.view = a.step;
+      } else if (a.step === 'member-planning') {
+        if (!setupFinished(m) || !memberWithPlanning(m, a.member)) break;
+        m.view = a.step;
+        m.memberId = a.member;
+      } else if (setupStatus(m, a.step) !== 'todo') m.view = a.step;
+      if (m.view !== 'member-planning') delete m.memberId;
+      const kept =
+        (a.from === 'plannings' && a.step === 'planning') || (a.from === 'dashboard' && (a.step === 'prestations' || a.step === 'member-planning'));
+      if (kept && a.from !== undefined && m.view === a.step && setupFinished(m)) m.from = a.from;
+      else delete m.from;
+      break;
+    }
+    // Écart au backlog : les heures d'ouverture limitent le planning du gérant (`planningError`), pas encore celui du
+    // coiffeur des autres scénarios (`agent.week`, E6-5). Un planning du gérant déjà enregistré n'est pas revérifié
+    // quand les heures changent après coup.
+    case 'managerSaveHours': {
+      const m = s.manager;
+      if (!m || m.setupDone === undefined || a.hours.length !== 7 || a.hours.some((d) => d.ranges.length < 1 || d.ranges.length > 2)) break;
+      if (openingHoursError(a.hours) !== undefined) break;
+      // Les 2 plages d'un jour sont rangées dans l'ordre de la journée.
+      m.hours = a.hours.map((d) => ({ ...d, ranges: [...d.ranges].sort((x, y) => x.start - y.start).map((r) => ({ ...r })) }));
+      finishSetupStep(m, 'horaires');
+      break;
+    }
+    // Seuls les noms changent : la liste des postes reste celle du moteur (1 par file de l'abonnement). Les noms sont
+    // enregistrés sans les espaces autour. Refus d'un poste inconnu, d'un nom vide, de 2 noms identiques ou de plus
+    // de postes que de files.
+    case 'managerSavePoints': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'postes') === 'todo') break;
+      if (Object.keys(a.names).some((id) => !m.points.some((p) => p.id === id))) break;
+      const points = m.points.map((p) => ({ id: p.id, name: (a.names[p.id] ?? p.name).trim() }));
+      if (pointsError(points, m.files) !== undefined) break;
+      m.points = points;
+      finishSetupStep(m, 'postes');
+      break;
+    }
+    // Achat simulé : la vraie page d'achat est sur le site de WaitAway (E3-0), pas dans l'application.
+    // 1 file de plus dans l'abonnement, et le poste qui va avec. Le nouveau poste doit être enregistré : si Postes
+    // était fait, l'étape repasse en cours, sans toucher aux autres étapes.
+    // Écart au backlog (E3-0) : dans la démo, l'achat n'est possible que pendant la configuration. Une fois finie, il
+    // est refusé : sinon il remettrait Postes en cours, la configuration ne serait plus finie et le saut « 1 semaine
+    // plus tard » serait refusé.
+    case 'managerBuyFile': {
+      const m = s.manager;
+      if (!m || !m.setupDone || setupFinished(m) || setupStatus(m, 'postes') === 'todo') break;
+      m.files += 1;
+      while (m.points.length < m.files) m.points.push(nextPoint(m.points));
+      m.setupDone = m.setupDone.filter((id) => id !== 'postes');
+      break;
+    }
+    // Catalogue du Store (E6-1) : les prestations du gérant sont validées d'office. Refus d'une prestation créée
+    // invalide (nom vide, doublon, durée hors de la roulette), d'un id inconnu, d'une durée hors de la roulette,
+    // d'un catalogue vide et de 2 prestations du même nom. Seules les prestations créées cochées sont gardées.
+    // Écart : le catalogue du Store ne remplace pas encore `CATALOG` dans les scénarios coiffeur et client, où l'agent
+    // choisit toujours dans le catalogue WaitAway.
+    case 'managerSavePrestations': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'prestations') === 'todo') break;
+      const created: Prestation[] = [];
+      for (const p of a.created) {
+        if (newPrestationError(p, created) !== undefined || !GROUPS.some((g) => g.id === p.group) || CATALOG.some((c) => c.id === p.id) || created.some((c) => c.id === p.id)) break;
+        created.push(p);
+      }
+      if (created.length !== a.created.length) break;
+      const known = new Set([...CATALOG, ...created].map((p) => p.id));
+      if (Object.entries(a.minutes).some(([id, n]) => !known.has(id) || !validMinutes(n))) break;
+      const prestations = storePrestations(created, a.minutes);
+      if (storePrestationsError(prestations) !== undefined) break;
+      m.created = created.filter((p) => p.id in a.minutes).map((p) => ({ ...p, label: p.label.trim(), description: p.description.trim() }));
+      m.prestations = storePrestations(m.created, a.minutes);
+      finishSetupStep(m, 'prestations');
+      break;
+    }
+    // E6-1 : le gérant valide une prestation proposée par l'équipe. Elle entre dans le catalogue du Store comme une
+    // prestation qu'il aurait créée (`created`, avec l'id de la proposition), retenue avec la durée proposée, réglable
+    // ensuite sur l'écran Prestations comme les autres. Refus d'un id inconnu ou déjà traité, et d'un nom déjà pris
+    // (`proposalError`), pour que le catalogue reste enregistrable.
+    // Écart au backlog : le côté coiffeur (proposer une prestation) n'est relié à aucun scénario coiffeur. Les
+    // propositions viennent du saut « 1 semaine plus tard » (`managerWeekLater`).
+    case 'managerAcceptProposal': {
+      const m = s.manager;
+      const p = m?.proposals?.find((x) => x.id === a.id && x.state === 'en-attente');
+      if (!m || !p || proposalError(p, m.created) !== undefined || m.created.some((x) => x.id === p.id)) break;
+      m.created.push(proposalToPrestation(p));
+      const minutes = { ...Object.fromEntries(m.prestations.map((x) => [x.id, x.minutes])), [p.id]: p.minutes };
+      m.prestations = storePrestations(m.created, minutes);
+      p.state = 'validee';
+      break;
+    }
+    // E6-1 : le gérant refuse une prestation proposée par l'équipe. Refus d'un id inconnu ou déjà traité.
+    // Écart au backlog : le message de refus est gardé sur la proposition, mais il n'est transmis à personne, le côté
+    // coiffeur n'étant pas maquetté.
+    case 'managerRejectProposal': {
+      const p = s.manager?.proposals?.find((x) => x.id === a.id && x.state === 'en-attente');
+      if (!p) break;
+      p.state = 'refusee';
+      const message = a.message?.trim();
+      if (message) p.message = message;
+      break;
+    }
+    // Invitation d'un membre de l'équipe par lien d'inscription (E3-2). Refus si `inviteError` trouve une erreur, ou
+    // d'un rôle ou d'un statut inconnu. Un indépendant n'a pas de volume horaire.
+    // Écart au backlog : le rôle est enregistré mais ne change encore aucun droit (E5-2). L'invitation reste en
+    // attente dans la démo, sauf celle du 1er membre de l'équipe (`featuredMember`), acceptée au saut « 1 semaine plus
+    // tard » (`managerWeekLater`). Elle n'est reliée à aucun autre scénario.
+    case 'managerInvite': {
+      const m = s.manager;
+      const d = a.invite;
+      if (!m || setupStatus(m, 'equipe') === 'todo') break;
+      if (!['agent', 'gerant'].includes(d.role) || !['salarie', 'independant'].includes(d.status)) break;
+      if (inviteError(d, m) !== undefined) break;
+      let n = m.team.length + 1;
+      while (m.team.some((x) => x.id === `invite-${n}`)) n++;
+      m.team.push({
+        id: `invite-${n}`,
+        firstName: d.firstName.trim(),
+        email: d.email.trim().toLowerCase(),
+        role: d.role,
+        status: d.status,
+        ...(d.status === 'salarie' ? { hours: d.hours } : {}),
+        invited: true,
+      });
+      break;
+    }
+    // Seule une invitation en attente s'annule.
+    case 'managerCancelInvite': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'equipe') === 'todo') break;
+      m.team = m.team.filter((x) => !(x.id === a.id && x.invited));
+      break;
+    }
+    // Le gérant peut enregistrer seul : une équipe sans invitation est acceptée.
+    case 'managerSaveTeam': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'equipe') === 'todo') break;
+      finishSetupStep(m, 'equipe');
+      break;
+    }
+    // Planning du gérant qui coiffe aussi. Refus si `managerPlanningError` trouve une erreur, chevauchement avec un
+    // membre compris (E6-15). Le gérant qui ne coiffe pas n'a pas de planning : celui qu'il avait est retiré.
+    // Écart au backlog : la limite aux heures d'ouverture (E6-5) ne vaut encore que pour le planning du gérant, pas
+    // pour celui du coiffeur (`agent.week`).
+    case 'managerSavePlanning': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'planning') === 'todo') break;
+      if (managerPlanningError(m, a.cuts, a.planning) !== undefined) break;
+      m.cuts = a.cuts;
+      if (a.cuts && a.planning) m.planning = structuredClone(a.planning);
+      else delete m.planning;
+      finishSetupStep(m, 'planning');
+      break;
+    }
+    // Écart au backlog (E3-3) : impression simulée, aucune fenêtre d'impression ne s'ouvre. L'affiche est seulement
+    // marquée imprimée. Refus d'un id inconnu. Un poste ajouté plus tard (achat simulé d'1 file) arrive avec une
+    // affiche pas encore imprimée.
+    case 'managerPrint': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'qr') === 'todo') break;
+      const ids = qrPosters(m).map((p) => p.id);
+      if (a.id !== undefined && !ids.includes(a.id)) break;
+      for (const id of a.id === undefined ? ids : [a.id]) if (!m.printed.includes(id)) m.printed.push(id);
+      break;
+    }
+    // Dernière étape de la configuration : le gérant peut terminer sans avoir imprimé ses affiches.
+    case 'managerFinishSetup': {
+      const m = s.manager;
+      if (!m || setupStatus(m, 'qr') === 'todo') break;
+      finishSetupStep(m, 'qr');
+      break;
+    }
+    // Saut « 1 semaine plus tard », refusé tant que la configuration n'est pas finie, et une seule fois. Le coiffeur
+    // invité (`featuredMember`, le 1er de l'équipe) accepte son invitation, quels que soient son prénom et son e-mail.
+    // L'historique figé de `WEEK_HISTORY` est copié pour les jours où le salon est ouvert : le gérant y figure s'il
+    // coiffe et travaille ce jour-là (son planning), le coiffeur invité s'il existe. Les autres invitations restent en attente.
+    // Écart : simulation, la semaine n'est pas jouée. L'heure et le jour simulés ne changent pas (lundi, 7 jours plus tard).
+    case 'managerWeekLater': {
+      const m = s.manager;
+      if (!m || !setupFinished(m) || m.history) break;
+      const member = featuredMember(m);
+      // Le coiffeur invité a aussi envoyé son planning (`featuredPlanning`), au 1er poste : il reste à figer.
+      if (member) {
+        member.invited = false;
+        member.planning = featuredPlanning(m.points[0]?.id);
+        member.planningState = 'a-figer';
+        // Il a aussi proposé 2 prestations absentes du catalogue (`FEATURED_PROPOSALS`), en attente du gérant (E6-1).
+        m.proposals = FEATURED_PROPOSALS.map((p) => ({ ...p, memberId: member.id, state: 'en-attente' }));
+      }
+      m.history = WEEK_HISTORY.map((d) => ({
+        day: d.day,
+        date: d.date,
+        entries: m.hours[d.day].open
+          ? [
+              ...(m.cuts && m.planning?.[d.day].works ? [{ who: MANAGER_WHO, ...d.gerant }] : []),
+              ...(member ? [{ who: member.id, ...d.member }] : []),
+            ]
+          : [],
+      }));
+      break;
+    }
+    // Le gérant corrige le planning d'1 membre (E6-14), figé ou non : son état ne change pas. Refus si
+    // `memberPlanningError` trouve une erreur, chevauchement compris (E6-15).
+    case 'managerSaveMemberPlanning': {
+      const m = s.manager;
+      if (!m || !setupFinished(m)) break;
+      const x = memberWithPlanning(m, a.id);
+      if (!x || memberPlanningError(m, a.id, a.planning) !== undefined) break;
+      x.planning = structuredClone(a.planning);
+      break;
+    }
+    // Le planning de l'écran est enregistré puis figé. Refus d'un planning déjà figé, et si `memberPlanningError`
+    // trouve une erreur : un chevauchement empêche de figer.
+    // Écart au backlog (E6-14) : le côté coiffeur (un planning figé qu'il ne peut plus modifier) n'est relié à aucun
+    // scénario coiffeur.
+    case 'managerFreezePlanning': {
+      const m = s.manager;
+      if (!m || !setupFinished(m)) break;
+      const x = memberWithPlanning(m, a.id);
+      if (!x || x.planningState === 'fige' || memberPlanningError(m, a.id, a.planning) !== undefined) break;
+      x.planning = structuredClone(a.planning);
+      x.planningState = 'fige';
+      break;
+    }
+    // Seul un planning figé se rouvre. Écart au backlog (E6-14) : le lien envoyé au membre pour qu'il modifie son
+    // planning est simulé, l'écran affiche seulement qu'il est parti.
+    case 'managerReopenPlanning': {
+      const m = s.manager;
+      if (!m || !setupFinished(m)) break;
+      const x = memberWithPlanning(m, a.id);
+      if (x?.planningState === 'fige') x.planningState = 'ouvert';
+      break;
+    }
     case 'agentSetupDone':
       s.agent.setup = 'done';
       agentFile().endOfDay = todayPlan(s).end;

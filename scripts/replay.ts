@@ -1,5 +1,5 @@
 /*
- * Rejoue les 3 scénarios du guide hors navigateur, dans plusieurs configurations, et vérifie que chaque étape
+ * Rejoue les 4 scénarios du guide hors navigateur, dans plusieurs configurations, et vérifie que chaque étape
  * s'affiche. Lancer avec `npm run replay`.
  *
  * Le script joue le rôle de la personne devant l'écran. À chaque tour, il fait le geste que demande l'étape
@@ -13,13 +13,16 @@
  *   (le champ dit dans quel cas) : elle est comptée à part.
  * Code de sortie 1 s'il y a une étape bloquée ou une étape sautée sans `canSkip`.
  */
-import { AGENT_FILE_ID, h } from '../src/sim/data';
+import { AGENT_FILE_ID, ANTOINE_EMAIL, h } from '../src/sim/data';
 import {
   canConfirm,
   canJoin,
   canStart,
   closeDue,
+  createPrestation,
+  defaultPlanning,
   durationSuggestions,
+  featuredMember,
   fileById,
   fmt,
   myTicket,
@@ -28,11 +31,13 @@ import {
   pauseEnd,
   pauseOverdue,
   pendingOvertime,
+  qrPosters,
   runningPause,
   todayPlan,
+  type InviteDraft,
 } from '../src/sim/engine';
 import { BARBERS } from '../src/sim/salon';
-import { guideReducer, stepsOf, type GuideAction, type Step } from '../src/sim/scenarios';
+import { guideReducer, stepJump, stepText, stepsOf, type GuideAction, type Step } from '../src/sim/scenarios';
 import type { ScenarioId, SimState } from '../src/sim/types';
 
 // ---------- Configurations ----------
@@ -70,10 +75,18 @@ const journeeLabel = (c: JourneeCfg) =>
 
 // ---------- Gestes ----------
 
-/** Un geste, ou `null` : le script touche alors le bouton de saut, ou laisse passer 1 min. */
-type Gesture = (s: SimState, st: Step, notes: string[]) => GuideAction | GuideAction[] | null;
+/**
+ * L'étape telle qu'affichée : sa consigne lue dans l'état en cours (`stepText`), et son bouton de saut, absent quand
+ * il est masqué (`stepJump`).
+ */
+type ShownStep = Omit<Step, 'text'> & { text: string };
 
-const starts = (st: Step, text: string) => st.text.startsWith(text);
+const shownStep = (st: Step, s: SimState): ShownStep => ({ ...st, text: stepText(st, s), jump: stepJump(st, s) });
+
+/** Un geste, ou `null` : le script touche alors le bouton de saut, ou laisse passer 1 min. */
+type Gesture = (s: SimState, st: ShownStep, notes: string[]) => GuideAction | GuideAction[] | null;
+
+const starts = (st: ShownStep, text: string) => st.text.startsWith(text);
 
 function journeeGesture(c: JourneeCfg): Gesture {
   return (s, st, notes) => {
@@ -148,6 +161,89 @@ const compteGesture: Gesture = (s) => {
   return null;
 };
 
+/** Un cas du scénario gérant : achat simulé d'1 file ou non, et le coiffeur invité à l'étape Équipe. */
+type GerantCfg = { achat: boolean; invite: InviteDraft; inverse?: boolean };
+
+/** Le coiffeur que propose la consigne. */
+const ANTOINE: InviteDraft = { firstName: 'Antoine', email: ANTOINE_EMAIL, role: 'agent', status: 'salarie', hours: 35 };
+/** Un autre coiffeur, indépendant : le scénario ne doit pas dépendre d'Antoine. */
+const YANIS: InviteDraft = { firstName: 'Yanis', email: 'yanis@exemple.fr', role: 'agent', status: 'independant' };
+
+/**
+ * Le gérant vérifie les infos de son achat sans les changer, puis touche « Configurer mon salon ».
+ * Aux heures d'ouverture, il règle le samedi de 9h00 à 18h00 et enregistre : le lundi est déjà fermé.
+ * Aux postes, il renomme le 1er en « Fauteuil vitrine » et enregistre. Avec `achat`, il achète d'abord 1 file
+ * de plus (achat simulé) et nomme le 2e poste « Fauteuil du fond ».
+ * Aux prestations, il coche le dégradé, le taper fade, la coupe classique et la taille de barbe classique, crée
+ * « Contour au rasoir » de 15 min dans le bloc barbe, et enregistre.
+ * À l'équipe, il invite le coiffeur du cas (`invite` : Antoine, salarié à 35 h, comme le propose la consigne, ou un
+ * autre) et enregistre.
+ * À son planning, il garde « Je coiffe aussi » et le planning pré-rempli (1er poste, même avec 2 postes), retire le
+ * mercredi et enregistre.
+ * Aux QR codes, il touche « Tout imprimer », puis « Terminer la configuration ».
+ * 1 semaine plus tard, il touche le saut « 1 semaine plus tard », puis ouvre son tableau de bord. Le saut est un geste
+ * et non `null` : il ne valide pas l'étape seul, le rejeu le prendrait pour un saut qui ne mène nulle part.
+ * Il ouvre ensuite le planning du coiffeur invité (même geste que le lien de « À traiter » ou la carte de Plannings),
+ * retire son samedi, enregistre, puis fige le planning. Les étapes 9 à 11 commencent par son prénom : elles sont
+ * reconnues à la suite du texte.
+ * Enfin, il ouvre l'écran Prestations depuis « À traiter », valide « Contour de barbe au fil » et refuse « Coloration
+ * de barbe » avec un message. Avec `inverse`, il fait les choix inverses : la consigne n'est qu'une suggestion.
+ */
+function gerantGesture({ achat, invite, inverse }: GerantCfg): Gesture {
+  return (s, st) => {
+    const m = s.manager;
+    if (!m) return null;
+    if (m.setupDone === undefined) return { type: 'managerStartSetup' };
+    if (starts(st, 'Règle les heures d’ouverture'))
+      return {
+        type: 'managerSaveHours',
+        hours: m.hours.map((d) => (d.day === 5 ? { ...d, open: true, ranges: [{ start: h(9), end: h(18) }] } : d)),
+      };
+    if (starts(st, 'Nomme le poste de ton abonnement')) {
+      if (achat && m.points.length < 2) return { type: 'managerBuyFile' };
+      const names = ['Fauteuil vitrine', 'Fauteuil du fond'];
+      return { type: 'managerSavePoints', names: Object.fromEntries(m.points.map((p, i) => [p.id, names[i] ?? p.name])) };
+    }
+    if (starts(st, 'Choisis les prestations de ton salon')) {
+      const contour = createPrestation({ label: 'Contour au rasoir', group: 'barbe', minutes: 15, description: '' }, m.created);
+      const minutes = { degrade: 30, taper: 30, classique: 25, 'barbe-classique': 30, [contour.id]: contour.minutes };
+      return { type: 'managerSavePrestations', created: [...m.created, contour], minutes };
+    }
+    if (starts(st, 'Invite Antoine,')) {
+      if (!m.team.some((x) => x.email === invite.email)) return { type: 'managerInvite', invite };
+      return { type: 'managerSaveTeam' };
+    }
+    if (starts(st, 'Tu coiffes aussi, sauf le mercredi')) {
+      const planning = (m.planning ?? defaultPlanning(m)).map((d) => (d.day === 2 ? { ...d, works: false } : d));
+      return { type: 'managerSavePlanning', cuts: true, planning };
+    }
+    if (starts(st, 'Imprime toutes les affiches')) {
+      if (qrPosters(m).some((p) => !m.printed.includes(p.id))) return { type: 'managerPrint' };
+      return { type: 'managerFinishSetup' };
+    }
+    if (starts(st, '1 semaine a passé')) return m.history ? { type: 'managerOpen', step: 'dashboard' } : { type: 'jump' };
+    const x = featuredMember(m);
+    if (st.text.includes(' a envoyé son planning.') && x) return { type: 'managerOpen', step: 'member-planning', member: x.id };
+    if (starts(st, 'Le samedi, ') && st.text.includes(' est sur ton poste en même temps que toi.') && x?.planning) {
+      if (x.planning[5].works) {
+        const planning = x.planning.map((d) => (d.day === 5 ? { ...d, works: false } : d));
+        return { type: 'managerSaveMemberPlanning', id: x.id, planning };
+      }
+      return { type: 'managerFreezePlanning', id: x.id, planning: x.planning };
+    }
+    if (st.text.endsWith(' propose 2 prestations. Valide «\u00a0Contour de barbe au fil\u00a0» et refuse «\u00a0Coloration de barbe\u00a0».')) {
+      if (m.view !== 'prestations') return { type: 'managerOpen', step: 'prestations', from: 'dashboard' };
+      const pending = (label: string) => m.proposals?.find((p) => p.label === label && p.state === 'en-attente');
+      const [accepted, rejected] = inverse ? ['Coloration de barbe', 'Contour de barbe au fil'] : ['Contour de barbe au fil', 'Coloration de barbe'];
+      const accept = pending(accepted);
+      if (accept) return { type: 'managerAcceptProposal', id: accept.id };
+      const reject = pending(rejected);
+      if (reject) return { type: 'managerRejectProposal', id: reject.id, message: inverse ? 'Pas de fil au salon.' : 'Pas de coloration au salon.' };
+    }
+    return null;
+  };
+}
+
 /** Le client choisit la 1re prestation que l'écran accepte. */
 function firstAllowed(s: SimState, fileId: string): string[] {
   const f = fileById(s, fileId);
@@ -201,6 +297,8 @@ type Run = {
   shown: Set<string>;
   /** Les étapes du scénario, à la fin du rejeu. */
   steps: Step[];
+  /** L'état à la fin du rejeu, pour lire les consignes qui en dépendent. */
+  final: SimState;
   branch: string;
   /** Index au-delà duquel les étapes ne comptent pas : le scénario s'est arrêté avant (fermeture sur imprévu). */
   stopAt: number;
@@ -227,7 +325,7 @@ function play(scenario: ScenarioId, label: string, gesture: Gesture): Run {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const steps = stepsOf(s);
     if (s.scenario.beat >= steps.length) break;
-    const st = steps[s.scenario.beat];
+    const st = shownStep(steps[s.scenario.beat], s);
     const g = gesture(s, st, notes);
     const actions: GuideAction[] = g === null ? [st.jump ? { type: 'jump' } : { type: 'advance', minutes: 1 }] : Array.isArray(g) ? g : [g];
     const before = key(s);
@@ -258,7 +356,7 @@ function play(scenario: ScenarioId, label: string, gesture: Gesture): Run {
   );
   const stopAt = incident ? lastShown : steps.length;
   if (!blocked && s.scenario.beat < steps.length) blocked = `le rejeu s’arrête à l’étape ${s.scenario.beat} après ${MAX_TURNS} tours`;
-  return { scenario, label, shown, steps, branch: s.scenario.branch ?? '', stopAt, blocked, notes, endedAt: s.now };
+  return { scenario, label, shown, steps, final: s, branch: s.scenario.branch ?? '', stopAt, blocked, notes, endedAt: s.now };
 }
 
 /** Les étapes jamais affichées. Pour le scénario client, les étapes du préfixe ont la clé de branche vide. */
@@ -279,11 +377,11 @@ function skipped(r: Run): { index: number; step: Step }[] {
 function report(title: string, runs: Run[]): boolean {
   const blocked = runs.filter((r) => r.blocked);
   // Étape sautée → les cas où elle a sauté.
-  const bySkip = new Map<string, { step: Step; index: number; labels: string[] }>();
+  const bySkip = new Map<string, { step: Step; text: string; index: number; labels: string[] }>();
   for (const r of runs)
     for (const { index, step } of skipped(r)) {
       const k = `${r.branch}#${index}`;
-      const e = bySkip.get(k) ?? { step, index, labels: [] };
+      const e = bySkip.get(k) ?? { step, text: stepText(step, r.final), index, labels: [] };
       e.labels.push(r.label);
       bySkip.set(k, e);
     }
@@ -301,8 +399,8 @@ function report(title: string, runs: Run[]): boolean {
   const total = runs[0]?.steps.length ?? 0;
   console.log(`\n${ok ? '✓' : '✗'} ${title} : ${runs.length - blocked.length}/${runs.length} cas terminés${runs.length === 1 ? `, ${total} étapes` : ''}`);
   for (const r of blocked) console.log(`  BLOQUÉ  ${r.label}\n          ${r.blocked}`);
-  const show = (e: { step: Step; index: number; labels: string[] }) =>
-    `étape ${e.index} « ${e.step.text.slice(0, 70)} » : ${e.labels.length}/${runs.length} cas` +
+  const show = (e: { text: string; index: number; labels: string[] }) =>
+    `étape ${e.index} « ${e.text.slice(0, 70)} » : ${e.labels.length}/${runs.length} cas` +
     (DETAIL ? e.labels.map((l) => `\n            ${l}`).join('') : e.labels.length <= 3 ? ` (${e.labels.join(' | ')})` : `, dont : ${e.labels[0]}`);
   for (const e of unexpected) console.log(`  SAUTÉE  ${show(e)}`);
   if (DETAIL) for (const e of expected) console.log(`  sautée, autorisé (${e.step.canSkip})  ${show(e)}`);
@@ -315,11 +413,18 @@ const journee = journeeConfigs().map((c) => play('pro-journee', journeeLabel(c),
 // Pas de sortie terminée sans prestation : chaque branche du scénario client est rejouée seule.
 const client = BARBERS.map((b) => play('client', `${b.name} (${b.tag})`, clientGesture(b.id)));
 const compte = [play('pro-compte', 'création du compte', compteGesture)];
+const gerant = [
+  play('gerant', 'installation du salon, 1 poste', gerantGesture({ achat: false, invite: ANTOINE })),
+  play('gerant', 'installation du salon, achat simulé d’1 file, 2 postes', gerantGesture({ achat: true, invite: ANTOINE })),
+  play('gerant', 'installation du salon, 1 poste, Yanis invité, indépendant', gerantGesture({ achat: false, invite: YANIS })),
+  play('gerant', 'installation du salon, 1 poste, choix inverses sur les prestations proposées', gerantGesture({ achat: false, invite: ANTOINE, inverse: true })),
+];
 
 const results = [
   report('Coiffeur : ma journée', journee),
   ...BARBERS.map((b, i) => report(`Client : ${b.name}, ${b.tag}`, [client[i]])),
   report('Coiffeur : je crée mon compte', compte),
+  report('Gérant : j’installe mon salon', gerant),
 ];
 const failed = results.filter((x) => !x).length;
 console.log(failed === 0 ? '\nTout passe.' : `\n${failed} scénario(s) à corriger.`);

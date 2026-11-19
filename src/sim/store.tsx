@@ -3,8 +3,9 @@ import { agentLate } from './engine';
 import { buildScenario, guideReducer, type GuideAction } from './scenarios';
 import type { SimState } from './types';
 
-// v8 : attente à l'inscription sur le ticket du client (`joinWait`), pour le cercle minuteur. Un état plus ancien est ignoré.
-const KEY = 'waitaway-demo-v8';
+// v20 : `Manager.proposals`, les prestations proposées par l'équipe, et `Manager.from` qui peut valoir `dashboard`
+// (Prestations ouvert depuis « À traiter »). Un état plus ancien est ignoré.
+const KEY = 'waitaway-demo-v20';
 
 function load(): SimState {
   try {

@@ -47,15 +47,15 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 │   └── manifest.webmanifest   # ouverture en plein écran sur téléphone
 ├── exemple/                   # images d’un tiers qui ont servi de modèle de style, hors git
 ├── scripts/
-│   ├── replay.ts              # rejeu des 3 scénarios hors navigateur (npm run replay)
+│   ├── replay.ts              # rejeu des 4 scénarios hors navigateur (npm run replay)
 │   └── viewport.html          # la maquette dans une iframe à largeur fixe, servie en dev seulement
 ├── src/
 │   ├── sim/
-│   │   ├── types.ts           # ticket, pause, file, comptes, état de la simulation
+│   │   ├── types.ts           # ticket, pause, file, comptes, gérant, état de la simulation
 │   │   ├── catalog.ts         # les 22 prestations proposées au coiffeur
 │   │   ├── data.ts            # Store, semaine type, pauses par défaut
 │   │   ├── engine.ts          # règles métier, sélecteurs, reducer
-│   │   ├── scenarios.ts       # les 3 scénarios : état de départ, arrivées, étapes du guide
+│   │   ├── scenarios.ts       # les 4 scénarios : état de départ, arrivées, étapes du guide
 │   │   ├── salon.ts           # scénario client : 7 coiffeurs, 1 cas chacun, et leurs gestes prévus
 │   │   └── store.tsx          # contexte React, lecture auto, sauvegarde locale
 │   ├── client/
@@ -68,10 +68,12 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 │   │   ├── Onboarding.tsx     # création du compte : profil, prestations, horaires
 │   │   ├── OpenWizard.tsx     # ouverture de la file en 3 pages
 │   │   └── Queue.tsx          # file, pauses, alerte de retard, walk-in, fermeture
+│   ├── manager/
+│   │   └── ManagerApp.tsx     # gérant : bienvenue après l'achat, 6 étapes de la configuration, puis menu : tableau de bord, équipe, plannings de l'équipe, Mon salon ; prestations proposées par l'équipe, à valider ou refuser
 │   ├── ui/
 │   │   ├── icons.tsx          # icônes de prestation et d'interface, en SVG
 │   │   └── kit.tsx            # scan simulé, roulette, notifications, panneaux, faux QR code
-│   ├── App.tsx                # barre de démo, bandeau guide, le téléphone du scénario
+│   ├── App.tsx                # page d'accueil et ses scénarios, barre de démo, bandeau guide, le téléphone du scénario
 │   ├── main.tsx
 │   └── styles.css             # tokens dans :root, puis composants
 ├── index.html
@@ -86,7 +88,7 @@ Dépôt git, prévu pour un dépôt GitHub public. **On travaille sur `dev`.** `
 npm run dev       # serveur accessible depuis un téléphone sur le même Wi-Fi
 npm run build     # vérifie les types et produit dist/
 npm run preview   # sert dist/ en local
-npm run replay    # rejoue les 3 scénarios dans 208 cas, signale les étapes bloquées ou sautées
+npm run replay    # rejoue les 4 scénarios dans 212 cas, signale les étapes bloquées ou sautées
 npm run replay -- --detail   # pareil, avec tous les cas de chaque étape sautée
 ```
 
@@ -102,7 +104,7 @@ npm run replay -- --detail   # pareil, avec tous les cas de chaque étape sauté
 ## Pièges
 
 - L'état est sauvegardé dans le `localStorage` du navigateur. Après un changement dans `src/sim/`, relancer un scénario par le menu ⋯, sinon l'ancien état reste affiché. Si la forme de l'état change, changer la clé `KEY` de `store.tsx`.
-- Chaque scénario montre 1 seul téléphone : celui du coiffeur dans les scénarios coiffeur (il pilote sa file avec son seul téléphone, décision de Gabi), celui du client dans le scénario client. Un geste d'un client dans un scénario coiffeur se simule par une arrivée du script, jamais par le téléphone client. À 900 px et plus, le téléphone s'affiche dans un cadre.
+- Chaque scénario montre 1 seul téléphone : celui du coiffeur dans les scénarios coiffeur (il pilote sa file avec son seul téléphone, décision de Gabi), celui du client dans le scénario client. Un geste d'un client dans un scénario coiffeur se simule par une arrivée du script, jamais par le téléphone client. À 900 px et plus, le téléphone s'affiche dans un cadre. Le scénario gérant fait exception : il montre l'écran du gérant, en 2 colonnes sans cadre de téléphone à 900 px et plus.
 - Un scénario est une suite d'étapes dans `src/sim/scenarios.ts`. Chaque étape finit quand sa condition `until` devient vraie. Une condition déjà vraie fait sauter l'étape : écris-la assez précise (un prénom, une heure). `npm run replay` signale toute étape qui n'a jamais été affichée. Si le saut est voulu, marque l'étape `canSkip` en disant dans quel cas.
 - `scripts/replay.ts` reconnaît certaines étapes à leur texte (« Ta pause finit dans 5 min », « Léo veut un dégradé »…) pour savoir quel geste faire. Après un changement de texte d'une étape, une étape bloquée dans le rejeu vient souvent de là.
 - Les heures du scénario « ma journée » tiennent aux durées du catalogue et aux pauses par défaut. Après un changement dans `catalog.ts` ou `data.ts`, rejoue le scénario en entier.
