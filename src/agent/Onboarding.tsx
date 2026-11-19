@@ -3,7 +3,7 @@ import { CATALOG } from '../sim/catalog';
 import { AGENT_FILE_ID, DAYS, PAUSE_LABEL } from '../sim/data';
 import { fileById, fmt } from '../sim/engine';
 import { useSim } from '../sim/store';
-import type { DayPlan } from '../sim/types';
+import type { DistributionPoint, OpeningRange, PlannedDay } from '../sim/types';
 import { PencilIcon, PrestationIcon } from '../ui/icons';
 import { Stepper, TimeWheel } from '../ui/kit';
 import { PauseEditor, byGroup } from './OpenWizard';
@@ -208,11 +208,43 @@ function Horaires() {
   );
 }
 
-/** 1 jour de la semaine type : début, 3 pauses, fin. */
-function DayEditor({ plan, onCancel, onSave }: { plan: DayPlan; onCancel: () => void; onSave: (p: DayPlan) => void }) {
-  const [d, setD] = useState<DayPlan>(() => structuredClone(plan));
+/**
+ * Réglages en plus pour les plannings vus par le gérant (`usePlanningEditor` dans `manager/ManagerApp.tsx`). Sans eux,
+ * l'éditeur est celui de la semaine type du coiffeur.
+ */
+export type DayEditorOptions = {
+  /** Heures d'ouverture du jour : le début et la fin restent dans cette amplitude. */
+  bounds?: OpeningRange;
+  /** Postes du salon : à partir de 2, le jour choisit le sien. */
+  points?: DistributionPoint[];
+  /** Erreur du jour, donnée par le moteur. Elle remplace le contrôle début et fin, et bloque « Valider ». */
+  error?: (d: PlannedDay) => string | undefined;
+  /** L'éditeur s'affiche dans une page du gérant, pas comme un écran entier. `wide` : sur ordinateur. */
+  inPage?: { wide: boolean };
+  /**
+   * Prénom du coiffeur dont c'est le planning, quand le gérant corrige celui d'un autre : l'éditeur parle alors de lui
+   * (« Léa travaille ce jour », « hors de ses heures de travail »). Absent : l'éditeur parle à celui qui le tient.
+   */
+  of?: string;
+};
+
+/** 1 jour de la semaine type : début, 3 pauses, fin. Avec `options`, 1 jour du planning du gérant. */
+export function DayEditor({
+  plan,
+  onCancel,
+  onSave,
+  options = {},
+}: {
+  plan: PlannedDay;
+  onCancel: () => void;
+  onSave: (p: PlannedDay) => void;
+  options?: DayEditorOptions;
+}) {
+  const { bounds, points = [], error, inPage, of } = options;
+  const [d, setD] = useState<PlannedDay>(() => structuredClone(plan));
   const [open, setOpen] = useState<'start' | 'end' | null>(null);
-  const invalid = d.works && d.end <= d.start;
+  const message = error ? error(d) : d.works && d.end <= d.start ? 'L’heure de fin doit venir après l’heure de début.' : undefined;
+  const clamp = (v: number) => (bounds ? Math.min(bounds.end, Math.max(bounds.start, v)) : v);
 
   const timeRow = (key: 'start' | 'end', label: string) => (
     <li className="pause-edit">
@@ -222,25 +254,45 @@ function DayEditor({ plan, onCancel, onSave }: { plan: DayPlan; onCancel: () => 
       </button>
       {open === key && (
         <div className="pause-edit-body">
-          <TimeWheel label={label} value={d[key]} onChange={(v) => setD({ ...d, [key]: v })} />
+          <TimeWheel label={label} value={d[key]} onChange={(v) => setD({ ...d, [key]: clamp(v) })} />
         </div>
       )}
     </li>
   );
 
-  return (
-    <main className="screen with-footer">
+  const body = (
+    <>
       <button className="back" onClick={onCancel}>
         Retour
       </button>
       <h1 className="title">{DAYS[d.day]}</h1>
 
       <div className="pause-edit">
-        <div className="pause-edit-head">
-          <strong>Je travaille ce jour</strong>
-          <button type="button" role="switch" aria-checked={d.works} aria-label="Je travaille ce jour" className="switch" onClick={() => setD({ ...d, works: !d.works })} />
-        </div>
+        <button type="button" role="switch" aria-checked={d.works} className="pause-edit-head switch-row" onClick={() => setD({ ...d, works: !d.works })}>
+          <strong>{of === undefined ? 'Je travaille ce jour' : `${of} travaille ce jour`}</strong>
+          <span className="switch" aria-hidden />
+        </button>
       </div>
+
+      {/* Pas en même temps qu'une erreur : un jour enregistré hors des heures d'ouverture répéterait ces heures 2 fois. */}
+      {d.works && bounds && !message && (
+        <p className="muted">
+          Le salon est ouvert de {fmt(bounds.start)} à {fmt(bounds.end)}.
+        </p>
+      )}
+
+      {d.works && points.length >= 2 && (
+        <div className="field">
+          <span>Poste</span>
+          <div className="seg mgr-seg" role="group" aria-label="Poste">
+            {points.map((p) => (
+              <button key={p.id} className={p.id === d.point ? 'on' : ''} aria-pressed={p.id === d.point} onClick={() => setD({ ...d, point: p.id })}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {d.works && (
         <ul className="pause-edits">
@@ -251,22 +303,24 @@ function DayEditor({ plan, onCancel, onSave }: { plan: DayPlan; onCancel: () => 
           {timeRow('end', 'Heure de fin')}
         </ul>
       )}
-      {invalid && <p className="error">L&rsquo;heure de fin doit venir après l&rsquo;heure de début.</p>}
+      {message && <p className="error">{message}</p>}
       {d.works && d.pauses.some((p) => p.on && (p.at < d.start || p.at >= d.end)) && (
         <p className="warn">
           {d.pauses
             .filter((p) => p.on && (p.at < d.start || p.at >= d.end))
             .map((p) => PAUSE_LABEL[p.id])
             .join(', ')}{' '}
-          : hors de tes heures de travail.
+          : hors de {of === undefined ? 'tes' : 'ses'} heures de travail.
         </p>
       )}
 
-      <footer className="footer">
-        <button className="btn btn-primary btn-lg" disabled={invalid} onClick={() => onSave(d)}>
+      <footer className={inPage?.wide ? 'mgr-footer' : 'footer'}>
+        <button className="btn btn-primary btn-lg" disabled={message !== undefined} onClick={() => onSave(d)}>
           Valider
         </button>
       </footer>
-    </main>
+    </>
   );
+
+  return inPage ? body : <main className="screen with-footer">{body}</main>;
 }

@@ -134,12 +134,15 @@ export function Wheel<T extends number>({
   const ref = useRef<HTMLDivElement>(null);
   const settle = useRef<ReturnType<typeof setTimeout>>();
   const idx = Math.max(0, values.indexOf(value));
+  // Compte les défilements terminés sur une autre valeur. L'écran peut garder sa valeur (une heure bornée, par
+  // exemple) : sans ce compteur, `idx` ne change pas et la colonne resterait sur la valeur refusée.
+  const [settled, setSettled] = useState(0);
 
   // Aligne la colonne sur la valeur, sauf si elle y est déjà (sinon le défilement en cours saute).
   useEffect(() => {
     const el = ref.current;
     if (el && Math.round(el.scrollTop / ROW) !== idx) el.scrollTop = idx * ROW;
-  }, [idx]);
+  }, [idx, settled]);
   useEffect(() => () => clearTimeout(settle.current), []);
 
   const onScroll = () => {
@@ -148,7 +151,10 @@ export function Wheel<T extends number>({
       const el = ref.current;
       if (!el) return;
       const i = Math.min(values.length - 1, Math.max(0, Math.round(el.scrollTop / ROW)));
-      if (values[i] !== value) onChange(values[i]);
+      if (values[i] !== value) {
+        onChange(values[i]);
+        setSettled((n) => n + 1);
+      }
     }, 90);
   };
   const move = (d: number) => {
@@ -216,15 +222,27 @@ export function DurationWheel({ value, onChange, label }: { value: number; onCha
   );
 }
 
-/** Ligne « − valeur + ». */
-export function Stepper({ value, onMinus, onPlus, label }: { value: string; onMinus?: () => void; onPlus?: () => void; label: string }) {
+/** Ligne « − valeur + ». `verbs` remplace « Réduire » et « Allonger », écrits pour une durée. */
+export function Stepper({
+  value,
+  onMinus,
+  onPlus,
+  label,
+  verbs = ['Réduire', 'Allonger'],
+}: {
+  value: string;
+  onMinus?: () => void;
+  onPlus?: () => void;
+  label: string;
+  verbs?: [string, string];
+}) {
   return (
     <span className="stepper-ctl">
-      <button type="button" aria-label={`Réduire ${label}`} disabled={!onMinus} onClick={onMinus}>
+      <button type="button" aria-label={`${verbs[0]} ${label}`} disabled={!onMinus} onClick={onMinus}>
         −
       </button>
       <strong>{value}</strong>
-      <button type="button" aria-label={`Allonger ${label}`} disabled={!onPlus} onClick={onPlus}>
+      <button type="button" aria-label={`${verbs[1]} ${label}`} disabled={!onPlus} onClick={onPlus}>
         +
       </button>
     </span>
@@ -245,4 +263,28 @@ export function useScan() {
     />
   ) : null;
   return { start: (label: string, then: () => void) => setScan({ label, then }), node };
+}
+
+/**
+ * Cercle dégressif : l'arc part de midi, dans le sens horaire, et sa longueur vaut `ratio` (0 à 1) du tour.
+ * La couleur vient de la variable CSS `--ring` du parent, le contenu central de `children`.
+ */
+export function CountdownRing({ ratio, label, children }: { ratio: number; label: string; children: ReactNode }) {
+  const r = 52;
+  const c = 2 * Math.PI * r;
+  const k = Math.max(0, Math.min(1, ratio));
+  return (
+    <div className="ring" role="img" aria-label={label}>
+      <svg viewBox="0 0 120 120" aria-hidden>
+        <circle className="ring-track" cx="60" cy="60" r={r} />
+        <circle className="ring-arc" cx="60" cy="60" r={r} strokeDasharray={c} strokeDashoffset={c * (1 - k)} transform="rotate(-90 60 60)" />
+        <g className="ring-dot-turn" style={{ transform: `rotate(${k * 360}deg)` }}>
+          <circle className="ring-dot" cx="60" cy={60 - r} r="7" />
+        </g>
+      </svg>
+      <div className="ring-center" aria-hidden>
+        {children}
+      </div>
+    </div>
+  );
 }

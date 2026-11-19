@@ -1,26 +1,73 @@
 import { CATALOG } from './catalog';
 import { SALON_START, salonFiles, salonHook, salonSteps } from './salon';
-import { AGENT_FILE_ID, MATHIS_FILE_ID, MATHIS_PRESTATIONS, defaultWeek, h } from './data';
-import { advanceUntil, durationSuggestions, fileById, inService, pauseEnd, reducer, remaining, syncClock, waiting, type Action } from './engine';
+import { AGENT_FILE_ID, ANTOINE_EMAIL, MATHIS_FILE_ID, MATHIS_PRESTATIONS, STORE, defaultOpeningHours, defaultWeek, h } from './data';
+import {
+  advanceUntil,
+  durationSuggestions,
+  featuredMember,
+  fileById,
+  inService,
+  pauseEnd,
+  pendingProposals,
+  pointsFor,
+  qrPosters,
+  reducer,
+  remaining,
+  setupStatus,
+  syncClock,
+  waiting,
+  type Action,
+} from './engine';
 import type { Arrival, PauseId, QueueFile, ScenarioId, SimState } from './types';
 
 /** 1 étape du guide affiché sous la barre de démo. */
 export type Step = {
-  /** La consigne, ou ce que le saut va montrer. */
-  text: string;
+  /**
+   * La consigne, ou ce que le saut va montrer. Une fonction quand la consigne dépend de l'état (le prénom du coiffeur
+   * invité, dans le scénario gérant) : lire le texte avec `stepText`.
+   */
+  text: string | ((s: SimState) => string);
   /** Libellé du bouton de saut dans le temps. Sans lui, l'étape est une consigne à faire à la main. */
   jump?: string;
+  /**
+   * Le bouton de saut est masqué, et le saut refusé, tant que cette condition est vraie : le saut est déjà fait, ou il
+   * n'est pas encore possible. L'étape attend alors la consigne de son texte. Lire le bouton avec `stepJump`.
+   */
+  jumpHidden?: (s: SimState) => boolean;
+  /**
+   * Action du moteur que fait le bouton de saut, à la place de l'avance du temps jusqu'à `until`. Pour un saut qui
+   * ne se joue pas en minutes (« 1 semaine plus tard »).
+   */
+  jumpAction?: Action;
   /** L'étape est finie quand cette condition devient vraie. */
   until: (s: SimState) => boolean;
   /** Mise en place faite à la fin de l'étape. */
   then?: (s: SimState) => void;
+  /**
+   * L'étape a le droit de ne jamais s'afficher, parce que sa condition est déjà vraie quand elle arrive. Le texte dit
+   * dans quel cas. Sans ce champ, `npm run replay` signale l'étape sautée comme une erreur.
+   */
+  canSkip?: string;
 };
 
-export type Scenario = { id: ScenarioId; label: string; hint: string; steps: Step[] };
+/** L'écran que montre un scénario : 1 seul par scénario. */
+export type ScenarioScreen = 'agent' | 'client' | 'manager';
+
+/** Nom de l'écran, affiché sur la page d'accueil et au-dessus du cadre de téléphone. */
+export const SCREEN_LABEL: Record<ScenarioScreen, string> = {
+  agent: 'Téléphone du coiffeur',
+  client: 'Téléphone du client',
+  manager: 'Écran du gérant',
+};
+
+export type Scenario = { id: ScenarioId; label: string; hint: string; screen: ScenarioScreen; steps: Step[] };
 
 // ---------- Raccourcis pour les conditions ----------
 
 const agentQueue = (s: SimState) => fileById(s, AGENT_FILE_ID);
+/** Prénom du coiffeur invité, pour les consignes du scénario gérant. */
+const featuredName = (s: SimState) => (s.manager && featuredMember(s.manager)?.firstName) ?? 'Ton coiffeur';
+/** La prestation `label`, proposée par l'équipe au gérant, est dans l'état `state`. */
 const ticket = (s: SimState, name: string) => agentQueue(s).tickets.find((t) => t.name === name);
 const pause = (s: SimState, id: PauseId) => agentQueue(s).pauses.find((p) => p.id === id);
 /** Vrai aussi quand l'agent a retiré cette pause de sa journée : l'étape saute. */
@@ -32,6 +79,8 @@ const pauseCalled = (s: SimState, id: PauseId) => pauseHandled(s, id) || pause(s
 /** Le walk-in qui prend place dans la file et attend son tour (pas celui pris tout de suite à la place d'un retardataire). */
 const guest = (s: SimState) =>
   agentQueue(s).tickets.find((t) => t.walkIn && t.startedAt !== t.joinedAt && t.joinedAt < agentQueue(s).endOfDay - 40);
+/** Le walk-in pris à la place de Théo : `takePresentClient` le démarre à la minute même où Théo est retiré. */
+const takenForTheo = (s: SimState, removedAt: number) => agentQueue(s).tickets.find((t) => t.walkIn && t.startedAt === removedAt);
 /** Arrête le temps : l'agent a quelque chose à faire. */
 const stopClock = (s: SimState) => {
   s.playing = false;
@@ -50,6 +99,9 @@ const startedAfterResume = (s: SimState, id: PauseId) => {
   const p = pause(s, id);
   return p?.endedAt !== undefined && agentQueue(s).tickets.some((t) => t.startedAt !== undefined && t.startedAt >= p.endedAt!);
 };
+/** Raisons des sauts autorisés, partagées par plusieurs étapes. */
+const LEO_AFTER_MIDI = 'coiffeur en retard le matin : la pause de midi passe avant Léo';
+const LEO_BEFORE_MIDI = 'le retard de Léo est déjà annoncé avant la pause de midi';
 const announceLeo = 'Léo veut un dégradé avec un motif : ce sera plus long que prévu. Touche sa carte et annonce un retard.';
 /** Léo a un retard annoncé ou constaté, ou n'est plus à servir. */
 const leoHandled = (s: SimState) => {
@@ -67,6 +119,7 @@ const pauseResumed = (s: SimState, id: PauseId) => {
 export const SCENARIOS: Record<ScenarioId, Scenario> = {
   'pro-journee': {
     id: 'pro-journee',
+    screen: 'agent',
     label: 'Coiffeur : ma journée',
     hint: 'The Best Barber ouvre sa file à 9h00. Clients, 3 pauses, un retard, des walk-in, la fermeture.',
     steps: [
@@ -93,8 +146,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       {
         text: announceLeo,
         until: (s) => ticket(s, 'Léo')?.startedAt === undefined || leoHandled(s),
+        canSkip: LEO_AFTER_MIDI,
       },
-      { text: 'Les clients concernés sont prévenus et la file est recalculée.', jump: 'Aller à la pause de midi', until: (s) => pauseCalled(s, 'midi') },
+      {
+        text: 'Les clients concernés sont prévenus et la file est recalculée.',
+        jump: 'Aller à la pause de midi',
+        until: (s) => pauseCalled(s, 'midi'),
+        canSkip: LEO_AFTER_MIDI,
+      },
       { text: scanPause, until: (s) => pauseHandled(s, 'midi') },
       { text: 'Tu déjeunes.', jump: 'Aller à 5 min de la reprise', until: (s) => pauseNear(s, 'midi') },
       { text: scanResume, until: (s) => pauseResumed(s, 'midi') || !agentQueue(s).open },
@@ -107,8 +166,9 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         then: (s) => {
           if (!leoHandled(s)) stopClock(s);
         },
+        canSkip: LEO_BEFORE_MIDI,
       },
-      { text: announceLeo, until: leoHandled },
+      { text: announceLeo, until: leoHandled, canSkip: LEO_BEFORE_MIDI },
       // Après un retard annoncé le matin, la pause de midi peut passer avant Léo : Théo n'est alors plus le 1er
       // à la reprise. L'étape attend qu'il soit en position 1, poste libre. Sinon, elle saute.
       {
@@ -123,11 +183,19 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       {
         text: 'Regarde les heures de la file : elles ont bougé avec ta décision.',
         jump: 'Aller à la fin de sa prestation',
-        until: (s) => ticket(s, 'Théo')?.abortAt !== undefined || ticket(s, 'Théo')?.startedAt !== undefined || s.lateAlert !== undefined,
+        // Théo retiré avec le walk-in : l'étape attend la fin du walk-in, sinon elle sauterait aussitôt.
+        until: (s) => {
+          const theo = ticket(s, 'Théo');
+          if (theo?.startedAt !== undefined || s.lateAlert !== undefined) return true;
+          if (theo?.abortAt === undefined) return false;
+          const taken = takenForTheo(s, theo.abortAt);
+          return !taken || taken.doneAt !== undefined;
+        },
       },
       {
         text: 'Théo n’est toujours pas là. Touche l’alerte et retire-le : les clients derrière lui avancent.',
         until: (s) => ticket(s, 'Théo')?.abortAt !== undefined || ticket(s, 'Théo')?.startedAt !== undefined,
+        canSkip: 'Théo a déjà été retiré à l’étape de l’alerte',
       },
       { text: 'L’après-midi se déroule.', jump: 'Aller à la pause de l’après-midi', until: (s) => pauseCalled(s, 'aprem') },
       { text: scanPause, until: (s) => pauseHandled(s, 'aprem') },
@@ -156,12 +224,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         text: 'Lucas veut une place qui finit après ta fermeture. Il est au salon et te le demande : accepte ou refuse.',
         until: (s) => ticket(s, 'Lucas')?.overtime !== 'pending',
         then: stopClock,
+        canSkip: 'fin de journée à 20h00 ou plus tard : Lucas s’inscrit normalement',
       },
       // Fermeture à 19h00 : Romain finirait plus de 30 min après, il est refusé d'office et le coiffeur ne voit rien.
       // L'étape saute. Fermeture à 20h00 ou plus tard : sa demande arrive chez le coiffeur.
       {
         text: 'Romain demande aussi une place, pour 40 min : accepte ou refuse.',
         until: (s) => ticket(s, 'Romain')?.overtime !== 'pending',
+        canSkip: 'fin de journée à 19h00 : Romain est refusé d’office',
       },
       {
         text: 'Plus personne ne s’inscrit.',
@@ -186,13 +256,15 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   // Les étapes viennent du coiffeur choisi : voir `salon.ts`.
   client: {
     id: 'client',
+    screen: 'client',
     label: 'Client : je m’inscris',
-    hint: '8 coiffeurs, 8 cas : parcours normal, premier de la file, retard du coiffeur, tour qui avance, client en retard, après la fermeture, imprévu, walk-in.',
+    hint: '7 coiffeurs, 7 cas : parcours normal, premier de la file, retard du coiffeur, client en retard, après la fermeture, imprévu, walk-in.',
     steps: [],
   },
 
   'pro-compte': {
     id: 'pro-compte',
+    screen: 'agent',
     label: 'Coiffeur : je crée mon compte',
     hint: 'E-mail et code, profil, prestations, horaires et pauses de la semaine.',
     steps: [
@@ -202,9 +274,98 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       { text: 'Vérifie tes horaires. Le crayon ouvre un jour : début, pauses, fin.', until: (s) => s.agent.setup === 'done' },
     ],
   },
+
+  // Le gérant vient de payer son abonnement sur le site de WaitAway : la page d'achat n'est pas maquettée.
+  gerant: {
+    id: 'gerant',
+    screen: 'manager',
+    label: 'Gérant : j’installe mon salon',
+    hint: 'Après l’achat sur le site : vérifier son compte, son salon et son abonnement, lancer la configuration, puis régler les heures d’ouverture, nommer les postes, choisir les prestations du salon, inviter un coiffeur, faire son planning de la semaine, imprimer les affiches des QR codes et terminer la configuration. 1 semaine plus tard, ouvrir son tableau de bord, puis le planning envoyé par le coiffeur invité : retirer son samedi, qui chevauche le tien sur le même poste, et le figer. Enfin, valider ou refuser les 2 prestations proposées par le coiffeur invité.',
+    steps: [
+      {
+        text: 'Bienvenue. Vérifie les infos de ton achat, puis touche « Configurer mon salon ».',
+        until: (s) => s.manager?.setupDone !== undefined,
+      },
+      {
+        text: 'Règle les heures d’ouverture du salon. Il est fermé le lundi, et le samedi il ferme à 18:00.',
+        // Les heures pré-remplies ne comptent pas : l'étape finit quand le gérant les enregistre.
+        until: (s) => s.manager !== undefined && setupStatus(s.manager, 'horaires') === 'done',
+      },
+      {
+        text: 'Nomme le poste de ton abonnement, par exemple « Fauteuil vitrine ». Pour en avoir un 2e, touche « Ajouter un poste », puis enregistre.',
+        // Les postes créés d'après l'abonnement ne comptent pas : l'étape finit quand le gérant les enregistre.
+        until: (s) => s.manager !== undefined && setupStatus(s.manager, 'postes') === 'done',
+      },
+      {
+        text: 'Choisis les prestations de ton salon. «\u00a0Contour au rasoir\u00a0» n’est pas dans la liste : crée-la, avec 15 min. Puis enregistre.',
+        // Rien n'est coché au départ : l'étape finit quand le gérant enregistre le catalogue de son salon.
+        until: (s) => s.manager !== undefined && setupStatus(s.manager, 'prestations') === 'done',
+      },
+      {
+        text: `Invite Antoine, coiffeur salarié à 35 h : ${ANTOINE_EMAIL}. Puis enregistre.`,
+        // Antoine n'est qu'une suggestion : l'étape finit quand le gérant enregistre son équipe avec au moins 1
+        // invitation dedans, quels que soient le prénom et l'e-mail. Le 1er invité devient le coiffeur invité du
+        // scénario (`featuredMember`).
+        until: (s) =>
+          s.manager !== undefined && s.manager.setupDone?.includes('equipe') === true && s.manager.team.some((x) => x.invited),
+      },
+      {
+        text: 'Tu coiffes aussi, sauf le mercredi : retire ce jour, puis enregistre.',
+        // Le planning pré-rempli ne compte pas : l'étape finit quand le gérant l'enregistre, sans le mercredi (index 2 de DAYS).
+        until: (s) =>
+          s.manager !== undefined &&
+          s.manager.setupDone?.includes('planning') === true &&
+          s.manager.planning !== undefined &&
+          !s.manager.planning[2].works,
+      },
+      {
+        text: 'Imprime toutes les affiches avec «\u00a0Tout imprimer\u00a0», puis termine la configuration.',
+        // « Terminer la configuration » marche sans impression : l'étape finit quand la configuration est terminée
+        // et que chaque affiche de `qrPosters` est imprimée.
+        until: ({ manager: m }) => m !== undefined && m.setupDone?.includes('qr') === true && qrPosters(m).every((p) => m.printed.includes(p.id)),
+      },
+      {
+        // Si toutes les invitations ont été annulées après l'étape 5, il n'y a plus de coiffeur invité : le saut est
+        // masqué et la consigne demande d'en inviter un. Le saut reste masqué une fois fait : l'étape attend alors
+        // seulement l'ouverture du tableau de bord.
+        text: ({ manager: m }) =>
+          m && (m.history !== undefined || featuredMember(m)) ? '1 semaine a passé. Ouvre ton tableau de bord.' : 'Invite d’abord un coiffeur depuis Équipe.',
+        jump: '1 semaine plus tard',
+        jumpAction: { type: 'managerWeekLater' },
+        jumpHidden: ({ manager: m }) => !m || m.history !== undefined || featuredMember(m) === undefined,
+        // L'étape finit quand l'historique existe (le saut est fait) et que le tableau de bord est affiché.
+        until: ({ manager: m }) => m?.history !== undefined && m.view === 'dashboard',
+      },
+      {
+        text: (s) => `${featuredName(s)} a envoyé son planning. Ouvre-le depuis «\u00a0Plannings\u00a0» ou «\u00a0À traiter\u00a0».`,
+        // L'étape d'avant finit sur le tableau de bord : le planning du coiffeur invité n'est pas encore affiché à son arrivée.
+        until: ({ manager: m }) => {
+          const x = m && featuredMember(m);
+          return x !== undefined && m?.view === 'member-planning' && m.memberId === x.id;
+        },
+      },
+      {
+        text: (s) =>
+          `Le samedi, ${featuredName(s)} est sur ton poste en même temps que toi. Retire son samedi et tout autre jour signalé, puis fige son planning.`,
+        // Le planning du coiffeur invité arrive « à figer » au saut : l'étape finit quand il est figé, sans le samedi (index 5 de DAYS).
+        until: ({ manager: m }) => {
+          const x = m && featuredMember(m);
+          return x?.planningState === 'fige' && x.planning !== undefined && !x.planning[5].works;
+        },
+      },
+      {
+        text: (s) =>
+          `${featuredName(s)} propose 2 prestations. Valide «\u00a0Contour de barbe au fil\u00a0» et refuse «\u00a0Coloration de barbe\u00a0».`,
+        // La consigne n'est qu'une suggestion : l'étape finit quand il ne reste plus de proposition en attente, quel que
+        // soit le choix (valider ou refuser). Les 2 propositions arrivent en attente au saut « 1 semaine plus tard ».
+        until: ({ manager: m }) => m?.history !== undefined && pendingProposals(m).length === 0,
+        canSkip: 'propositions déjà toutes traitées depuis «\u00a0À traiter\u00a0» pendant les étapes 8 à 10',
+      },
+    ],
+  },
 };
 
-export const SCENARIO_LIST = [SCENARIOS['pro-journee'], SCENARIOS.client, SCENARIOS['pro-compte']];
+export const SCENARIO_LIST = [SCENARIOS['pro-journee'], SCENARIOS.client, SCENARIOS['pro-compte'], SCENARIOS.gerant];
 
 // ---------- États de départ ----------
 
@@ -325,6 +486,13 @@ export function buildScenario(id: ScenarioId): SimState {
     kf.prestations = [];
   }
 
+  if (id === 'gerant') {
+    s.now = h(8);
+    s.weekday = 0;
+    // Saisi par le gérant à l'achat. STORE reste le salon des autres scénarios : le gérant modifie sa copie.
+    s.manager = { firstName: 'Samuelle', lastName: 'Moreau', email: 'samuelle@salonleclos.fr', store: { ...STORE }, files: 1, hours: defaultOpeningHours(), points: pointsFor(1), prestations: [], created: [], team: [], cuts: true, printed: [] };
+  }
+
   return s;
 }
 
@@ -334,6 +502,15 @@ export type GuideAction = Action | { type: 'scenario'; id: ScenarioId } | { type
 
 export const stepsOf = (s: SimState) => (s.scenario.id === 'client' ? salonSteps(s) : SCENARIOS[s.scenario.id].steps);
 export const currentStep = (s: SimState): Step | undefined => stepsOf(s)[s.scenario.beat];
+/** La consigne de l'étape, telle qu'affichée dans cet état. */
+export const stepText = (st: Step, s: SimState): string => (typeof st.text === 'function' ? st.text(s) : st.text);
+/** Le libellé du bouton de saut de l'étape dans cet état. Absent : pas de bouton, le saut est refusé. */
+export const stepJump = (st: Step, s: SimState): string | undefined => (st.jumpHidden?.(s) ? undefined : st.jump);
+/**
+ * Le scénario a commencé : au moins 1 étape du guide est passée, ou un coiffeur est choisi dans le scénario client.
+ * La page d'accueil propose alors de le reprendre là où il en est.
+ */
+export const scenarioStarted = (s: SimState) => s.scenario.beat > 0 || s.scenario.branch !== undefined;
 
 /** Le reducer de la démo : celui du moteur, plus le chargement d'un scénario et l'avancée du guide. */
 export function guideReducer(state: SimState, a: GuideAction): SimState {
@@ -342,12 +519,15 @@ export function guideReducer(state: SimState, a: GuideAction): SimState {
   else if (a.type === 'jump') {
     s = structuredClone(state);
     const st = currentStep(s);
-    if (st?.jump) {
+    if (st && stepJump(st, s)) {
       // Les notifications d'avant le saut sont périmées à l'arrivée.
       s.notifs = [];
-      // 1 journée entière au plus : le saut s'arrête même si sa condition n'arrive jamais.
-      advanceUntil(s, st.until, 720);
-      syncClock(state, s);
+      if (st.jumpAction) s = reducer(s, st.jumpAction);
+      else {
+        // 1 journée entière au plus : le saut s'arrête même si sa condition n'arrive jamais.
+        advanceUntil(s, st.until, 720);
+        syncClock(state, s);
+      }
     }
   } else s = reducer(state, a);
   if (s.scenario.id === 'client') s = salonHook(s);

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
+import type { Group } from '../sim/types';
 
-// Icônes de prestation, dessinées pour la maquette dans le style de `icon_exemple/` :
+// Icônes de prestation, dessinées pour la maquette dans le style des images de `exemple/` :
 // une silhouette claire sur une pastille sombre. Les couleurs viennent des tokens (voir `.picon`).
 // Classes : pi-fill (forme pleine), pi-soft (fondu), pi-line (trait gravé), pi-mark (trait clair),
 // pi-shade (zone grisée sur le visage : barbe, moustache).
@@ -217,12 +218,24 @@ const SCISSORS = (
 /** Les têtes sont dessinées avec de la marge : elles sont agrandies pour remplir la pastille. */
 const ZOOM = 'translate(24 25) scale(1.12) translate(-24 -24)';
 
-export function PrestationIcon({ id, size = 44 }: { id: string; size?: number }) {
+/**
+ * L'icône d'1 bloc, pour une prestation sans dessin propre (créée par le gérant ou proposée par l'équipe) : une coupe
+ * classique, une barbe, un shampoing. Le bloc Autres garde les ciseaux.
+ */
+const GROUP_ICON: Record<Group, ReactNode> = {
+  coupe: <g transform={ZOOM}><Head cut={CUTS.classique} /></g>,
+  barbe: OTHERS['barbe-classique'],
+  soin: OTHERS.shampoing,
+  autre: SCISSORS,
+};
+
+/** `group` : le bloc de la prestation, dont l'icône remplace les ciseaux quand `id` n'a pas de dessin propre. */
+export function PrestationIcon({ id, group, size = 44 }: { id: string; group?: Group; size?: number }) {
   const cut = CUTS[id];
   return (
     <span className="picon" style={{ width: size, height: size }} aria-hidden>
       <svg viewBox="0 0 48 48" width="100%" height="100%">
-        {cut ? <g transform={ZOOM}><Head cut={cut} /></g> : OTHERS[id] ?? SCISSORS}
+        {cut ? <g transform={ZOOM}><Head cut={cut} /></g> : OTHERS[id] ?? (group ? GROUP_ICON[group] : SCISSORS)}
       </svg>
     </span>
   );
@@ -235,6 +248,12 @@ const ui = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 
 export const PencilIcon = () => (
   <svg {...ui}>
     <path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 013 3L8 18.5 4 20zM14.5 6l3 3" />
+  </svg>
+);
+
+export const CrossIcon = () => (
+  <svg {...ui}>
+    <path d="M6 6l12 12M18 6L6 18" />
   </svg>
 );
 

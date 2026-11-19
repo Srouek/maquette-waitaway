@@ -13,6 +13,8 @@
   --chrome: #d5dae1;     /* bordures */
   --muted: #5b6577;
   --brass-light: #e2c48b; /* laiton clair : texte et boutons sur fond bleu nuit */
+  --oxblood-light: #e8806f; /* corail : « Tu as le temps » sur le ticket, lisible sur bleu nuit */
+  --mint-light: #5fcb98;    /* vert clair : « Tu es le prochain » sur le ticket, lisible sur bleu nuit */
   --brass-ink: #7a5413;   /* laiton foncé : texte sur fond laiton clair */
   --brass-line: #e6cf9f;
   --disabled: #9aa3b2;
@@ -60,12 +62,32 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 .clock { font: 700 18px var(--font-display); font-variant-numeric: tabular-nums; margin-left: auto; padding: 0 4px; }
 .demobtn {
-  flex: none; min-height: 36px; min-width: 38px; padding: 0 9px; white-space: nowrap;
+  flex: none; min-height: var(--tap); min-width: var(--tap); padding: 0 12px; white-space: nowrap;
   border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: transparent; color: var(--paper);
   font-size: 15px;
 }
 .demobtn[aria-pressed='true'] { background: var(--brass); border-color: var(--brass); color: var(--ink); }
 .single { flex: 1; min-height: 0; position: relative; }
+
+/* Page d'accueil du site : la démo en 1 phrase, puis les scénarios. */
+.home-page {
+  height: 100dvh; overflow-y: auto; background: var(--paper);
+  padding: calc(24px + env(safe-area-inset-top)) var(--gutter) calc(32px + env(safe-area-inset-bottom));
+}
+.home-page-inner { max-width: 960px; margin: 0 auto; display: grid; gap: var(--gutter); }
+.home-page .brand { font-size: 30px; }
+.home-page .brand-mark { width: 44px; height: 44px; border-radius: var(--r-sm); font-size: 24px; }
+.home-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gutter); }
+.home-card {
+  display: grid; align-content: start; gap: 6px; min-height: var(--tap); padding: 16px 18px; text-align: left;
+  border: 1px solid var(--chrome); border-radius: var(--r-md); background: var(--surface);
+}
+.home-card strong { font: 700 21px/1.2 var(--font-display); }
+.home-card-screen { justify-self: start; padding: 3px 10px; border-radius: 999px; background: var(--track); font-size: 14px; font-weight: 700; }
+.home-card-resume { grid-column: 1 / -1; background: var(--ink); border-color: var(--ink); color: var(--paper); }
+@media (min-width: 900px) {
+  .home-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .stage { flex: 1; min-height: 0; display: flex; justify-content: center; align-items: center; gap: 56px; padding: 24px; }
 .device { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
@@ -107,7 +129,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .end .display { margin-top: 28%; }
 
 .back {
-  align-self: flex-start; min-height: 40px; padding: 0 2px; border: 0; background: none;
+  align-self: flex-start; min-height: var(--tap); padding: 0 2px; border: 0; background: none;
   color: var(--muted); font-size: 16px;
 }
 .back::before { content: '‹ '; font-size: 20px; }
@@ -225,13 +247,29 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 
 /* ---------- Ticket : l'élément fort ---------- */
 .ticket { border-radius: var(--r-lg); overflow: hidden; background: var(--surface); box-shadow: 0 12px 28px rgba(21,34,56,.14); }
-.ticket-main { background: var(--ink); color: var(--paper); padding: 22px 22px 20px; }
-.ticket-kicker { color: var(--brass-light); font-weight: 700; }
-.ticket-num {
-  font: 800 148px/0.9 var(--font-display); letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
-  margin: 6px 0 18px;
-}
-.ticket-num-next { color: var(--brass-light); }
+.ticket-main { display: grid; gap: 16px; text-align: center; background: var(--ink); color: var(--paper); padding: 22px 22px 20px; }
+.ticket-where { color: var(--brass-light); font-weight: 700; }
+.phase-temps { --ring: var(--oxblood-light); }
+.phase-route, .phase-arrive { --ring: var(--brass-light); }
+.phase-prochain { --ring: var(--mint-light); }
+.ticket-phase { display: grid; gap: 2px; }
+.ticket-phase span { font-size: 15px; opacity: .85; }
+.ticket-phase strong { font: 700 24px var(--font-display); color: var(--ring); }
+.ticket-main .ticket-facts { text-align: left; padding-top: 16px; border-top: 1px solid var(--night-line); }
+.ticket-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+.ticket-line strong { min-width: 0; }
+
+/* Cercle minuteur : se vide à mesure que le tour approche */
+.ring { position: relative; justify-self: center; width: min(210px, 100%); aspect-ratio: 1; }
+.ring svg { display: block; width: 100%; height: 100%; }
+.ring-track, .ring-arc { fill: none; stroke-width: 9; }
+.ring-track { stroke: var(--night-line); }
+.ring-arc { stroke: var(--ring); stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
+.ring-dot { fill: var(--ring); }
+.ring-dot-turn { transform-origin: 60px 60px; transition: transform .6s ease; }
+.ring-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; }
+.ring-num { font: 800 84px/0.9 var(--font-display); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.ring-unit { font-size: 20px; opacity: .85; }
 .ticket-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ticket-facts span { display: grid; font-size: 15px; opacity: .85; }
 .ticket-facts strong { font: 700 24px var(--font-display); opacity: 1; }
@@ -342,7 +380,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media (max-width: 360px) {
-  .ticket-num { font-size: 120px; }
+  .ring-num { font-size: 72px; }
   .display { font-size: 38px; }
 }
 
@@ -357,7 +395,7 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 .guide-text { flex: 1 1 200px; min-width: 0; }
 .guide-jump {
-  flex: 1 1 auto; min-height: 40px; padding: 6px 16px; border: 0; border-radius: 999px;
+  flex: 1 1 auto; min-height: var(--tap); padding: 6px 16px; border: 0; border-radius: 999px;
   background: var(--brass-light); color: var(--ink); font-weight: 700; font-size: 15px;
 }
 @media (min-width: 900px) {
@@ -426,8 +464,9 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .time-value { font: 700 22px var(--font-display); font-variant-numeric: tabular-nums; }
 .switch { flex: none; position: relative; width: 54px; height: 32px; border: 0; border-radius: 999px; background: var(--disabled); transition: background .15s; }
 .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--surface); transition: transform .15s; }
-.switch[aria-checked='true'] { background: var(--mint); }
-.switch[aria-checked='true']::after { transform: translateX(22px); }
+/* Toute la ligne est l'interrupteur : le rond n'est qu'un dessin, l'état est porté par la ligne. */
+.switch-row[aria-checked='true'] .switch { background: var(--mint); }
+.switch-row[aria-checked='true'] .switch::after { transform: translateX(22px); }
 
 .week { display: grid; gap: 8px; }
 .week-day { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 6px 8px 14px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--chrome); }
@@ -458,11 +497,157 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .account-head { display: flex; align-items: center; gap: 12px; }
 .account-name { flex: 1; min-width: 0; font: 700 26px var(--font-display); }
 .scan-btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; }
-.wait-card { display: grid; gap: 14px; padding: 16px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--chrome); box-shadow: 0 8px 20px rgba(21,34,56,.08); }
-.wait-head { display: flex; align-items: center; gap: 12px; }
-.wait-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 0; border-block: 1px solid var(--chrome); }
-.wait-facts span { display: grid; font-size: 14px; color: var(--muted); }
-.wait-facts strong { font: 700 24px var(--font-display); color: var(--ink); }
-.ticket-with { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; width: 100%; font-weight: 700; }
 .google { display: inline-grid; place-items: center; width: 26px; height: 26px; margin-right: 10px; border-radius: 50%; border: 2px solid var(--chrome); font: 800 15px var(--font-display); vertical-align: middle; }
 .field input[aria-invalid='true'] { border-color: var(--danger); }
+
+/* ---------- Gérant : installation du salon ---------- */
+.chip-doing { background: var(--brass-soft); color: var(--brass-ink); }
+
+/* Ordinateur : les étapes à gauche, la page à droite, sur toute la largeur sous le guide. */
+.desk { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr); background: var(--paper); }
+.desk-side {
+  display: flex; flex-direction: column; gap: 16px; padding: 24px 20px; overflow-y: auto;
+  background: var(--surface); border-right: 1px solid var(--chrome);
+}
+.desk-caption { color: var(--muted); font-size: 15px; }
+.desk-page {
+  overflow-y: auto; display: flex; flex-direction: column; gap: 24px;
+  padding: 32px clamp(24px, 4vw, 56px) 40px;
+}
+.desk-page > * { width: 100%; max-width: 960px; }
+/* Le fond d'un panneau couvre tout l'écran du gérant, pas seulement les 960 px de la page. */
+.desk-page > .sheet-backdrop { max-width: none; }
+/* Sur ordinateur, le panneau reste à une largeur de formulaire, centré. */
+.desk-page > .sheet-backdrop .sheet { max-width: 560px; margin: 0 auto; border-radius: var(--r-lg); align-self: center; }
+.desk-page > .back { width: auto; }
+
+.mgr-head { display: grid; gap: 6px; }
+.mgr-blocks { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); align-items: start; }
+.mgr-block {
+  display: grid; gap: 12px; padding: 16px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--chrome);
+}
+.mgr-block-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mgr-block-title { font: 700 19px var(--font-display); }
+.mgr-block-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mgr-block-actions .btn { padding: 0 8px; }
+.mgr-lines { display: grid; gap: 2px; overflow-wrap: anywhere; }
+
+.mgr-config { display: grid; gap: 10px; }
+.mgr-steps { display: grid; gap: 6px; }
+.mgr-step {
+  width: 100%; display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 6px 12px;
+  border-radius: var(--r-sm); border: 2px solid transparent; background: none; text-align: left;
+}
+button.mgr-step:not(.on):hover { border-color: var(--chrome); }
+.mgr-step.on { background: var(--brass-soft); border-color: var(--brass-line); }
+.mgr-step-num {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 999px;
+  background: var(--track); font: 700 14px var(--font-display);
+}
+.mgr-step.on .mgr-step-num { background: var(--ink); color: var(--paper); }
+.mgr-step-label { flex: 1; min-width: 0; font-weight: 700; }
+.mgr-footer { display: flex; }
+.mgr-footer .btn-lg { width: auto; padding: 0 32px; }
+.mgr-copy { display: grid; gap: 6px; }
+
+/* Prestations du salon : 1 colonne sur téléphone, 2 sur ordinateur, pour ne pas étirer une ligne sur 960 px. */
+.mgr-choices { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); align-items: start; }
+.mgr-count { font-weight: 700; }
+.mgr-seg { display: flex; flex-wrap: wrap; border-radius: var(--r-md); }
+.mgr-seg button { flex: 1 1 auto; min-height: var(--tap); border-radius: var(--r-sm); }
+
+/* Prestations proposées par l'équipe : 1 carte par proposition, les 2 boutons sous le nom, à droite. */
+.mgr-proposals { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); align-items: start; }
+.mgr-proposal {
+  display: grid; gap: 10px; padding: 12px 14px;
+  background: var(--surface); border: 2px solid var(--brass-line); border-radius: var(--r-md);
+}
+.mgr-proposal-head { display: flex; align-items: center; gap: 12px; }
+/* Ligne de confirmation d'une carte traitée : même place, même hauteur (gardée au geste), sans bouton. */
+.mgr-proposal-done { display: flex; align-items: center; border-color: var(--chrome); overflow-wrap: anywhere; }
+.mgr-proposal-text { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.mgr-proposal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+
+/* Équipe : à 360 px, les actions d'une invitation passent sous le nom ; sur ordinateur, elles restent à droite. */
+.mgr-member { flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+.mgr-member .week-info { flex: 1 1 200px; gap: 4px; }
+.mgr-member-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.mgr-hours { justify-items: start; }
+
+/* QR codes : les affiches l'une sous l'autre sur téléphone, côte à côte sur ordinateur. */
+.mgr-posters { display: grid; gap: 16px; }
+@media (min-width: 900px) {
+  .mgr-posters { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+}
+/* Les cartes d'une même rangée ont la même hauteur : les actions sont poussées en bas pour que les « Imprimer » s'alignent. */
+.mgr-poster-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mgr-poster {
+  display: grid; justify-items: center; gap: 10px; padding: 20px 16px; text-align: center;
+  background: var(--surface); border: 1px solid var(--chrome); border-radius: var(--r-md);
+}
+.mgr-poster .qr { display: block; max-width: 100%; height: auto; }
+.mgr-poster-place { color: var(--muted); font-size: 15px; font-weight: 700; }
+.mgr-poster-title { font: 700 21px var(--font-display); overflow-wrap: anywhere; }
+.mgr-poster-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: auto; }
+
+/* Menu du gérant, une fois la configuration finie : à gauche sur ordinateur, en bas sur téléphone. */
+.mgr-menu { display: grid; gap: 6px; }
+.mgr-menu button {
+  width: 100%; min-height: var(--tap); padding: 6px 12px; text-align: left; font-weight: 700;
+  border-radius: var(--r-sm); border: 2px solid transparent; background: none;
+}
+.mgr-menu button:not(.on):hover { border-color: var(--chrome); }
+.mgr-menu button.on { background: var(--brass-soft); border-color: var(--brass-line); }
+.app.with-tabs { display: flex; flex-direction: column; }
+.app.with-tabs > .screen { flex: 1; min-height: 0; height: auto; }
+/* Le menu du bas porte déjà la marge de la zone sûre (safe-area-inset-bottom) : la page et son pied ne la rajoutent pas. */
+.app.with-tabs > .screen:not(.with-footer) { padding-bottom: 24px; }
+.app.with-tabs .footer { padding-bottom: 14px; }
+.mgr-tabs {
+  flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--chrome);
+}
+.mgr-tabs button {
+  min-height: var(--tap); padding: 4px 6px; border: 0; border-radius: var(--r-sm); background: none;
+  color: var(--muted); font-size: 15px; font-weight: 700; line-height: 1.2;
+}
+.mgr-tabs button.on { background: var(--brass-soft); color: var(--ink); }
+
+/* Tableau de bord : 2 chiffres, l'attente par jour en barres, puis par coiffeur. Les 7 barres tiennent à 360 px. */
+.mgr-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.mgr-stat { gap: 4px; }
+.mgr-stat-label { color: var(--muted); font-size: 15px; font-weight: 700; }
+.mgr-stat-value { font: 700 34px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.mgr-bars { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.mgr-bar { display: grid; grid-template-rows: auto 120px auto; justify-items: center; gap: 4px; min-width: 0; text-align: center; }
+.mgr-bar-value { font: 700 15px var(--font-display); font-variant-numeric: tabular-nums; }
+.mgr-bar.off .mgr-bar-value { color: var(--muted); font: 400 12px var(--font-body); align-self: end; }
+.mgr-bar-track {
+  width: 100%; max-width: 40px; height: 100%; display: flex; align-items: flex-end; overflow: hidden;
+  background: var(--track); border-radius: var(--r-sm);
+}
+.mgr-bar.off .mgr-bar-track { background: none; border: 1px dashed var(--chrome); }
+.mgr-bar-fill { width: 100%; background: var(--ink); border-radius: var(--r-sm) var(--r-sm) 0 0; }
+.mgr-bar-day { color: var(--muted); font-size: 13px; line-height: 1.2; }
+.mgr-agents { display: grid; }
+.mgr-agent { display: grid; gap: 2px; padding: 10px 0; border-top: 1px solid var(--chrome); }
+.mgr-agent:first-child { border-top: 0; padding-top: 0; }
+/* À traiter : des lignes d'info, et un lien souligné pour chaque planning à figer. */
+.mgr-todo { display: grid; gap: 8px; }
+.mgr-todo li { display: flex; align-items: baseline; gap: 10px; }
+.mgr-todo li:has(.mgr-todo-link) { align-items: center; }
+.mgr-todo-link {
+  min-height: var(--tap); padding: 0; border: 0; background: none; text-align: left;
+  font-weight: 700; text-decoration: underline; text-underline-offset: 3px;
+}
+
+/* Plannings de l'équipe : 1 carte par coiffeur, qui ouvre son planning. */
+.mgr-plannings { display: grid; gap: 10px; }
+.mgr-planning-card {
+  width: 100%; display: grid; justify-items: start; gap: 6px; min-height: var(--tap); padding: 12px 14px; text-align: left;
+  background: var(--surface); border: 1px solid var(--chrome); border-radius: var(--r-md); overflow-wrap: anywhere;
+}
+button.mgr-planning-card:hover { border-color: var(--brass-line); }
+.mgr-planning-card .warn { justify-self: stretch; }
+.mgr-todo li::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--brass); transform: translateY(-2px); }
